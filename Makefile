@@ -4,7 +4,7 @@ CC         ?= gcc
 LD         ?= ld
 OBJCOPY    ?= objcopy
 
-CFLAGS := -std=gnu11 -O2 -ffreestanding -fno-stack-protector -fno-pic -mno-red-zone -nostdlib -nostartfiles -Wall -Wextra
+CFLAGS := -std=gnu11 -O2 -ffreestanding -fno-stack-protector -fno-pic -mno-red-zone -mgeneral-regs-only -nostdlib -nostartfiles -Wall -Wextra
 NASMFLAGS := -Wall -Werror
 
 BUILD_DIR := build

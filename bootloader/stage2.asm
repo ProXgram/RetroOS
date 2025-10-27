@@ -14,6 +14,8 @@ LONG_STACK_TOP equ 0x001FF000
 PML4 equ 0x00009000
 PDPT equ 0x0000A000
 PD   equ 0x0000B000
+PD_HIGH equ 0x0000C000
+BOOT_INFO equ 0x00005000
 
 stage2_start:
     cli
@@ -22,6 +24,16 @@ stage2_start:
     mov es, ax
     mov ss, ax
     mov sp, 0x7E00
+
+    mov ax, 0x0013
+    int 0x10
+
+    mov dword [BOOT_INFO + 0], 320
+    mov dword [BOOT_INFO + 4], 200
+    mov dword [BOOT_INFO + 8], 320
+    mov dword [BOOT_INFO + 12], 8
+    mov dword [BOOT_INFO + 16], 0x000A0000
+    mov dword [BOOT_INFO + 20], 0
 
     call enable_a20
 
@@ -69,6 +81,11 @@ protected_mode_entry:
     mov ecx, 4096 / 4
     rep stosd
 
+    mov edi, PD_HIGH
+    xor eax, eax
+    mov ecx, 4096 / 4
+    rep stosd
+
     mov eax, PDPT | 0x3
     mov [PML4], eax
     mov dword [PML4 + 4], 0
@@ -77,9 +94,35 @@ protected_mode_entry:
     mov [PDPT], eax
     mov dword [PDPT + 4], 0
 
-    mov eax, 0x00000083
-    mov [PD], eax
-    mov dword [PD + 4], 0
+    mov eax, PD_HIGH | 0x3
+    mov [PDPT + 24], eax
+    mov dword [PDPT + 28], 0
+
+    mov ecx, 512
+    xor eax, eax
+    mov edi, PD
+.map_low:
+    mov edx, eax
+    or edx, 0x00000083
+    mov [edi], edx
+    mov dword [edi + 4], 0
+    add eax, 0x00200000
+    add edi, 8
+    loop .map_low
+
+    mov edi, PD_HIGH
+    mov eax, 0xC0000083
+    mov [edi + (0 * 8)], eax
+    mov dword [edi + (0 * 8) + 4], 0
+    mov eax, 0xC0020083
+    mov [edi + (1 * 8)], eax
+    mov dword [edi + (1 * 8) + 4], 0
+    mov eax, 0xC0040083
+    mov [edi + (2 * 8)], eax
+    mov dword [edi + (2 * 8) + 4], 0
+    mov eax, 0xC0060083
+    mov [edi + (3 * 8)], eax
+    mov dword [edi + (3 * 8) + 4], 0
 
     mov eax, PML4
     mov cr3, eax
@@ -111,6 +154,7 @@ long_mode_entry:
     mov rsp, LONG_STACK_TOP
     xor rbp, rbp
 
+    mov rdi, BOOT_INFO
     mov rax, KERNEL_DEST
     call rax
 
