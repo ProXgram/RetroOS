@@ -1,0 +1,16 @@
+#ifndef TERMINAL_H
+#define TERMINAL_H
+
+#include <stddef.h>
+#include <stdint.h>
+
+void terminal_initialize(void);
+void terminal_clear(void);
+void terminal_setcolors(uint8_t fg, uint8_t bg);
+void terminal_write_char(char c);
+void terminal_write(const char* data, size_t length);
+void terminal_writestring(const char* data);
+void terminal_write_uint(unsigned int value);
+void terminal_newline(void);
+
+#endif /* TERMINAL_H */
