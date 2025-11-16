@@ -1,10 +1,15 @@
+#include <stdbool.h>
 #include <stddef.h>
 #include <stdint.h>
 
+#include "background.h"
+#include "fs.h"
 #include "keyboard.h"
 #include "kstring.h"
 #include "os_info.h"
 #include "shell.h"
+#include "system.h"
+#include "syslog.h"
 #include "terminal.h"
 
 struct shell_command {
@@ -20,17 +25,27 @@ static void command_about(const char* args);
 static void command_clear(const char* args);
 static void command_color(const char* args);
 static void command_echo(const char* args);
+static void command_ls(const char* args);
+static void command_cat(const char* args);
+static void command_sysinfo(const char* args);
+static void command_logs(const char* args);
 
 static void command_history(const char* args);
 static void command_palette(const char* args);
+
+static void log_command_invocation(const char* command_name);
 
 static const struct shell_command COMMANDS[] = {
     {"help", command_help, "Show this help message"},
     {"about", command_about, "Learn more about " OS_NAME},
     {"clear", command_clear, "Clear the screen"},
     {"color", command_color, "Update text colors (0-15)"},
+    {"ls", command_ls, "List files in the virtual FS"},
+    {"cat", command_cat, "Print a file from the virtual FS"},
     {"history", command_history, "Show recent commands"},
     {"palette", command_palette, "Display VGA color codes"},
+    {"sysinfo", command_sysinfo, "Display hardware and memory info"},
+    {"logs", command_logs, "Show the latest system logs"},
     {"echo", command_echo, "Display text back to you"},
 };
 #define COMMAND_COUNT (sizeof(COMMANDS) / sizeof(COMMANDS[0]))
@@ -69,7 +84,7 @@ static void command_about(const char* args) {
 
 static void command_clear(const char* args) {
     (void)args;
-    terminal_clear();
+    background_render();
     shell_print_banner();
 }
 
@@ -200,11 +215,13 @@ static void execute_command(const char* input) {
     for (size_t i = 0; i < COMMAND_COUNT; i++) {
         size_t name_length = kstrlen(COMMANDS[i].name);
         if (command_length == name_length && kstrncmp(trimmed, COMMANDS[i].name, name_length) == 0) {
+            log_command_invocation(COMMANDS[i].name);
             COMMANDS[i].handler(cursor);
             return;
         }
     }
 
+    syslog_write("Command: unknown");
     terminal_writestring("Unknown command. Type 'help' for a list of commands.\n");
 }
 

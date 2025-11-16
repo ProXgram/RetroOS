@@ -1,41 +1,31 @@
 #include <stddef.h>
 #include <stdint.h>
 
+#include "background.h"
+#include "fs.h"
 #include "shell.h"
+#include "system.h"
+#include "syslog.h"
 #include "terminal.h"
 
-/*
- * Basic boot information provided by the second-stage loader.  The loader
- * passes a pointer to this structure in RDI before jumping into the kernel's
- * entry point.
- */
-struct BootInfo {
-    uint32_t width;
-    uint32_t height;
-    uint32_t pitch;
-    uint32_t bpp;
-    uint64_t framebuffer;
-};
+static void boot_sequence(const struct BootInfo* boot_info) {
+    syslog_init();
+    syslog_write("Boot: entered kernel");
 
-static struct BootInfo g_boot_info = {
-    .width = 80,
-    .height = 25,
-    .pitch = 0,
-    .bpp = 0,
-    .framebuffer = 0,
-};
+    system_cache_boot_info(boot_info);
+    const struct BootInfo* cached = system_boot_info();
 
-static void cache_boot_info(const struct BootInfo* boot_info) {
-    if (boot_info == NULL) {
-        return;
-    }
+    terminal_initialize(cached->width, cached->height);
+    syslog_write("Boot: terminal initialized");
 
-    g_boot_info = *boot_info;
+    background_render();
+    fs_init();
+    syslog_write("Boot: virtual filesystem mounted");
 }
 
 void kmain(const struct BootInfo* boot_info) {
-    cache_boot_info(boot_info);
+    boot_sequence(boot_info);
 
-    terminal_initialize(g_boot_info.width, g_boot_info.height);
+    syslog_write("Shell: starting interactive console");
     shell_run();
 }
