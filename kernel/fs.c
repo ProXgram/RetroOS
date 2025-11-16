@@ -157,11 +157,10 @@ bool fs_touch(const char* name) {
 }
 
 bool fs_write(const char* name, const char* contents) {
-    if (name == NULL || contents == NULL) {
+    if (contents == NULL) {
         return false;
     }
 
-    bool existed = fs_find_mutable(name) != NULL;
     if (!fs_touch(name)) {
         return false;
     }
@@ -173,9 +172,6 @@ bool fs_write(const char* name, const char* contents) {
 
     size_t length = kstrlen(contents);
     if (length >= FS_MAX_FILE_SIZE) {
-        if (!existed) {
-            fs_clear(file);
-        }
         return false;
     }
 
@@ -188,11 +184,10 @@ bool fs_write(const char* name, const char* contents) {
 }
 
 bool fs_append(const char* name, const char* contents) {
-    if (name == NULL || contents == NULL) {
+    if (contents == NULL) {
         return false;
     }
 
-    bool existed = fs_find_mutable(name) != NULL;
     if (!fs_touch(name)) {
         return false;
     }
@@ -204,9 +199,6 @@ bool fs_append(const char* name, const char* contents) {
 
     size_t length = kstrlen(contents);
     if (file->size + length >= FS_MAX_FILE_SIZE) {
-        if (!existed) {
-            fs_clear(file);
-        }
         return false;
     }
 
