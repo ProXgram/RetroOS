@@ -259,6 +259,11 @@ const char* keyboard_history_step(int direction) {
 }
 
 static void keyboard_clear_line(size_t cursor, size_t length) {
+    if (length == 0) {
+        return;
+    }
+
+    terminal_begin_batch();
     if (cursor < length) {
         terminal_move_cursor_right(length - cursor);
     }
@@ -266,10 +271,12 @@ static void keyboard_clear_line(size_t cursor, size_t length) {
     for (size_t i = 0; i < length; i++) {
         terminal_write_char('\b');
     }
+    terminal_end_batch();
 }
 
 static void keyboard_replace_line(const char* source, char* buffer, size_t size,
                                   size_t* length, size_t* cursor) {
+    terminal_begin_batch();
     keyboard_clear_line(*cursor, *length);
 
     size_t copy_length = 0;
@@ -282,6 +289,7 @@ static void keyboard_replace_line(const char* source, char* buffer, size_t size,
     buffer[copy_length] = '\0';
     *length = copy_length;
     *cursor = copy_length;
+    terminal_end_batch();
 }
 
 static void keyboard_insert_char(char ch, char* buffer, size_t size,
@@ -290,6 +298,7 @@ static void keyboard_insert_char(char ch, char* buffer, size_t size,
         return;
     }
 
+    terminal_begin_batch();
     for (size_t i = *length; i > *cursor; i--) {
         buffer[i] = buffer[i - 1];
     }
@@ -306,6 +315,7 @@ static void keyboard_insert_char(char ch, char* buffer, size_t size,
     if (tail > 0) {
         terminal_move_cursor_left(tail);
     }
+    terminal_end_batch();
 }
 
 static void keyboard_handle_backspace(char* buffer, size_t* length, size_t* cursor) {
@@ -313,6 +323,7 @@ static void keyboard_handle_backspace(char* buffer, size_t* length, size_t* curs
         return;
     }
 
+    terminal_begin_batch();
     (*cursor)--;
     for (size_t i = *cursor; i < *length; i++) {
         buffer[i] = buffer[i + 1];
@@ -328,6 +339,7 @@ static void keyboard_handle_backspace(char* buffer, size_t* length, size_t* curs
     }
     terminal_write_char(' ');
     terminal_move_cursor_left(tail + 1);
+    terminal_end_batch();
 }
 
 static void keyboard_handle_delete(char* buffer, size_t* length, size_t* cursor) {
@@ -335,6 +347,7 @@ static void keyboard_handle_delete(char* buffer, size_t* length, size_t* cursor)
         return;
     }
 
+    terminal_begin_batch();
     for (size_t i = *cursor; i < *length; i++) {
         buffer[i] = buffer[i + 1];
     }
@@ -348,6 +361,7 @@ static void keyboard_handle_delete(char* buffer, size_t* length, size_t* cursor)
     }
     terminal_write_char(' ');
     terminal_move_cursor_left(tail + 1);
+    terminal_end_batch();
 }
 
 char keyboard_get_char(void) {
