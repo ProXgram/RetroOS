@@ -57,3 +57,22 @@ This removes all files under the `build/` directory.
 - `Makefile` — build orchestration that assembles the boot stages, compiles the kernel, and produces a bootable image.
 
 Feel free to hack on the kernel, expand the bootloader, or add new features to RetroOS!
+
+## Resolving GitHub merge conflicts
+
+If GitHub reports conflicts when you open a pull request, bring your branch up to date locally and resolve them before pushing:
+
+1. Fetch the latest changes and rebase or merge the current `main` branch:
+   ```sh
+   git fetch origin
+   git rebase origin/main   # or: git merge origin/main
+   ```
+2. Inspect the conflicted files (`git status` will list them) and edit each file to keep the correct content. Look for the `<<<<<<<`, `=======`, and `>>>>>>>` markers that Git inserts and remove them once you have chosen the desired lines.
+3. Stage the resolved files and continue the rebase (or create a merge commit):
+   ```sh
+   git add path/to/file
+   git rebase --continue   # or: git commit
+   ```
+4. Run `make` to ensure the combined changes still build, then force-push the updated branch to GitHub if you rebased (`git push --force-with-lease`).
+
+GitHub will automatically re-run its checks once your branch no longer has conflicts.
