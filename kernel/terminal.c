@@ -111,7 +111,13 @@ void terminal_initialize(uint32_t width, uint32_t height) {
     terminal_batch_depth = 0;
     terminal_row = 0;
     terminal_column = 0;
-    terminal_color = make_color(0x0F, 0x00);
+    /*
+     * The UI wallpaper renders with the classic white-on-blue palette.
+     * Initialize the terminal with the same colors so the shell text blends
+     * seamlessly with the background rather than reverting to the black VGA
+     * default.
+     */
+    terminal_color = make_color(0x0F, 0x01);
     terminal_buffer = VGA_MEMORY;
 
     current_mode = detect_terminal_mode(width, height);
