@@ -9,12 +9,24 @@ static size_t terminal_column;
 static uint8_t terminal_color;
 static uint16_t* terminal_buffer;
 
+static inline void outb(uint16_t port, uint8_t value) {
+    __asm__ volatile ("outb %0, %1" : : "a"(value), "Nd"(port));
+}
+
 static inline uint16_t vga_entry(char c, uint8_t color) {
     return (uint16_t)c | ((uint16_t)color << 8);
 }
 
 static inline uint8_t make_color(uint8_t fg, uint8_t bg) {
     return fg | (bg << 4);
+}
+
+static void terminal_update_cursor(void) {
+    const uint16_t position = (uint16_t)(terminal_row * VGA_WIDTH + terminal_column);
+    outb(0x3D4, 0x0F);
+    outb(0x3D5, (uint8_t)(position & 0xFF));
+    outb(0x3D4, 0x0E);
+    outb(0x3D5, (uint8_t)((position >> 8) & 0xFF));
 }
 
 static void scroll_if_needed(void) {
@@ -48,6 +60,8 @@ void terminal_initialize(void) {
             terminal_buffer[index] = vga_entry(' ', terminal_color);
         }
     }
+
+    terminal_update_cursor();
 }
 
 void terminal_clear(void) {
@@ -60,6 +74,8 @@ void terminal_clear(void) {
             terminal_buffer[index] = vga_entry(' ', terminal_color);
         }
     }
+
+    terminal_update_cursor();
 }
 
 void terminal_setcolors(uint8_t fg, uint8_t bg) {
@@ -76,11 +92,13 @@ void terminal_write_char(char c) {
         terminal_column = 0;
         terminal_row++;
         scroll_if_needed();
+        terminal_update_cursor();
         return;
     }
 
     if (c == '\r') {
         terminal_column = 0;
+        terminal_update_cursor();
         return;
     }
 
@@ -92,6 +110,7 @@ void terminal_write_char(char c) {
             terminal_column = VGA_WIDTH - 1;
         }
         terminal_setcell(terminal_column, terminal_row, ' ');
+        terminal_update_cursor();
         return;
     }
 
@@ -102,6 +121,8 @@ void terminal_write_char(char c) {
         terminal_row++;
         scroll_if_needed();
     }
+
+    terminal_update_cursor();
 }
 
 void terminal_write(const char* data, size_t length) {
