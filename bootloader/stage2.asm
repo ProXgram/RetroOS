@@ -6,8 +6,9 @@
 BITS 16
 ORG 0x7E00
 
-CODE_SEG equ 0x08
-DATA_SEG equ 0x10
+CODE32_SEG equ 0x08
+DATA_SEG  equ 0x10
+CODE64_SEG equ 0x18
 KERNEL_DEST equ 0x00100000
 PROTECTED_STACK equ 0x0009F000
 LONG_STACK_TOP equ 0x001FF000
@@ -40,9 +41,11 @@ stage2_start:
     lgdt [gdt_descriptor]
 
     mov eax, cr0
-    or eax, 0x1
+    or eax, 0x1               ; enable protected mode
+    and eax, ~(1 << 2)        ; clear EM to allow FPU/SSE instructions
+    or eax, (1 << 1)          ; ensure MP is set for proper FPU error reporting
     mov cr0, eax
-    jmp CODE_SEG:protected_mode_entry
+    jmp CODE32_SEG:protected_mode_entry
 
 enable_a20:
     in al, 0x92
@@ -128,7 +131,7 @@ protected_mode_entry:
     mov cr3, eax
 
     mov eax, cr4
-    or eax, (1 << 5)
+    or eax, (1 << 5) | (1 << 9) | (1 << 10) ; enable PAE and SSE support
     mov cr4, eax
 
     mov ecx, 0xC0000080
@@ -140,7 +143,7 @@ protected_mode_entry:
     or eax, (1 << 31)
     mov cr0, eax
 
-    jmp CODE_SEG:long_mode_entry
+    jmp CODE64_SEG:long_mode_entry
 
 [BITS 64]
 long_mode_entry:
@@ -166,18 +169,25 @@ long_mode_entry:
 gdt_start:
     dq 0
 
-    dw 0x0000
+    dw 0xFFFF
     dw 0x0000
     db 0x00
     db 10011010b
-    db 00100000b
+    db 11001111b
+    db 0x00
+
+    dw 0xFFFF
+    dw 0x0000
+    db 0x00
+    db 10010010b
+    db 11001111b
     db 0x00
 
     dw 0x0000
     dw 0x0000
     db 0x00
-    db 10010010b
-    db 00000000b
+    db 10011010b
+    db 00100000b
     db 0x00
 
 gdt_end:
