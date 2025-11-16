@@ -1,19 +1,28 @@
-# RetroOS
+# MemoriaOS
 
-This is my first repository created to harbor my first hobby OS.
+MemoriaOS is a deliberately small x86-64 hobby operating system with a nostalgic spin: it boots straight to a VGA text console,
+shows a retro banner, and drops you into a built-in shell. The goal is to keep the code approachable while capturing the charm of
+classic PCs.
 
-The name of the operating system is not yet chosen upon, therefore it is defaulted to RetroOS.
+This is my first operating-system project, so the repository doubles as a sandbox for experimenting with bootloaders, kernel
+structure, and user interaction.
 
-RetroOS seeks to be a modern x86-64 OS written in C with a retro style to it, restoring the golden era of operating systems
-with a nostalgic feel and a focus on simplicity.
+## Current features
 
-This operating system focuses on retro elements of an operating system, as well as the portability of retro games.
+- **Handmade boot flow** – a two-stage loader pulls the 64-bit kernel into memory and switches the CPU into long mode.
+- **Text-mode terminal** – the kernel owns the VGA text buffer, tracks the hardware cursor, and lets you change the foreground
+  and background colors.
+- **Interactive shell** – type `help` to discover commands such as `about`, `clear`, `color`, `history`, `palette`, and `echo`.
+  The new `history` command shows the most recent inputs while `palette` lists every VGA color code so you can theme the
+  console quickly.
+
+More functionality will follow over time, but these pieces make MemoriaOS fun to poke at immediately after boot.
 
 ## Getting started
 
-The repository now contains a handcrafted bootloader and a very small 64-bit kernel. The bootloader loads the kernel into
-memory, switches the CPU into long mode, and jumps into the kernel. Once running, the kernel clears the VGA text console,
-prints a welcome message, and waits for a line of keyboard input before echoing it back to the user.
+The repository contains a handcrafted bootloader and a tiny 64-bit kernel. The bootloader loads the kernel into memory,
+switches the CPU into long mode, and jumps into the kernel. Once running, the kernel clears the VGA text console, prints a
+welcome message, and waits for commands at the `memoria>` prompt.
 
 ### Requirements
 
@@ -31,7 +40,7 @@ The build has been tested with the GNU toolchain on Linux. You will need:
 make
 ```
 
-The command produces `build/RetroOS.img`, a raw disk image that contains the boot sector, bootloader, and kernel.
+The command produces `build/MemoriaOS.img`, a raw disk image that contains the boot sector, bootloader, and kernel.
 
 ### Run in QEMU
 
@@ -39,6 +48,8 @@ The command produces `build/RetroOS.img`, a raw disk image that contains the boo
 make run
 ```
 
+The QEMU window will display the boot banner and drop you into the tiny MemoriaOS shell. Type `help` to see the available
+commands (such as `about`, `clear`, `color`, `history`, `palette`, or `echo`).
 The QEMU window will display the boot banner and drop you into the tiny RetroOS shell. Type `help` to see the available
 commands (such as `about`, `clear`, `color`, or `echo`).
 
@@ -56,7 +67,7 @@ This removes all files under the `build/` directory.
 - `kernel/` — 64-bit freestanding kernel sources and linker script.
 - `Makefile` — build orchestration that assembles the boot stages, compiles the kernel, and produces a bootable image.
 
-Feel free to hack on the kernel, expand the bootloader, or add new features to RetroOS!
+Feel free to hack on the kernel, expand the bootloader, or add new features to MemoriaOS!
 
 ## Resolving GitHub merge conflicts
 
