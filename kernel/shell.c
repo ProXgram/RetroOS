@@ -3,6 +3,7 @@
 
 #include "keyboard.h"
 #include "kstring.h"
+#include "os_info.h"
 #include "shell.h"
 #include "terminal.h"
 
@@ -13,6 +14,7 @@ struct shell_command {
 };
 
 static void shell_print_banner(void);
+static void shell_print_prompt(void);
 static void command_help(const char* args);
 static void command_about(const char* args);
 static void command_clear(const char* args);
@@ -24,7 +26,7 @@ static void command_palette(const char* args);
 
 static const struct shell_command COMMANDS[] = {
     {"help", command_help, "Show this help message"},
-    {"about", command_about, "Learn more about NostaluxOS"},
+    {"about", command_about, "Learn more about " OS_NAME},
     {"clear", command_clear, "Clear the screen"},
     {"color", command_color, "Update text colors (0-15)"},
     {"history", command_history, "Show recent commands"},
@@ -36,9 +38,14 @@ static const struct shell_command COMMANDS[] = {
 #define INPUT_CAPACITY 128
 
 static void shell_print_banner(void) {
-    terminal_writestring("NostaluxOS 64-bit demo kernel\n");
-    terminal_writestring("Welcome to the NostaluxOS console!\n");
+    terminal_writestring(OS_BANNER_LINE "\n");
+    terminal_writestring(OS_WELCOME_LINE "\n");
     terminal_writestring("Type 'help' to list available commands.\n");
+}
+
+static void shell_print_prompt(void) {
+    terminal_newline();
+    terminal_writestring(OS_PROMPT_TEXT);
 }
 
 static void command_help(const char* args) {
@@ -55,9 +62,9 @@ static void command_help(const char* args) {
 
 static void command_about(const char* args) {
     (void)args;
-    terminal_writestring("NostaluxOS is a hobby 64-bit operating system kernel.\n");
-    terminal_writestring("It focuses on simplicity and a retro-inspired feel.\n");
-    terminal_writestring("Right now it ships with a text console shell and a handful of utilities.\n");
+    terminal_writestring(OS_ABOUT_SUMMARY "\n");
+    terminal_writestring(OS_ABOUT_FOCUS "\n");
+    terminal_writestring(OS_ABOUT_FEATURES "\n");
 }
 
 static void command_clear(const char* args) {
@@ -192,7 +199,7 @@ void shell_run(void) {
     shell_print_banner();
 
     for (;;) {
-        terminal_writestring("\nostalux> ");
+        shell_print_prompt();
         keyboard_read_line(input, sizeof(input));
         execute_command(input);
     }
