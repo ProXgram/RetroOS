@@ -39,8 +39,8 @@ The command produces `build/RetroOS.img`, a raw disk image that contains the boo
 make run
 ```
 
-The QEMU window will display the boot banner, show "Hello, world!", and prompt for input. Type a message and press Enter to
-see it echoed back by the kernel.
+The QEMU window will display the boot banner and drop you into the tiny RetroOS shell. Type `help` to see the available
+commands (such as `about`, `clear`, `color`, or `echo`).
 
 ### Cleaning
 
