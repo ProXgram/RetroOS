@@ -3,6 +3,7 @@
 
 #include "keyboard.h"
 #include "kstring.h"
+#include "os_info.h"
 #include "shell.h"
 #include "terminal.h"
 
@@ -13,6 +14,7 @@ struct shell_command {
 };
 
 static void shell_print_banner(void);
+static void shell_print_prompt(void);
 static void command_help(const char* args);
 static void command_about(const char* args);
 static void command_clear(const char* args);
@@ -24,7 +26,7 @@ static void command_palette(const char* args);
 
 static const struct shell_command COMMANDS[] = {
     {"help", command_help, "Show this help message"},
-    {"about", command_about, "Learn more about NostaluxOS"},
+    {"about", command_about, "Learn more about " OS_NAME},
     {"clear", command_clear, "Clear the screen"},
     {"color", command_color, "Update text colors (0-15)"},
     {"history", command_history, "Show recent commands"},
@@ -34,15 +36,15 @@ static const struct shell_command COMMANDS[] = {
 #define COMMAND_COUNT (sizeof(COMMANDS) / sizeof(COMMANDS[0]))
 
 #define INPUT_CAPACITY 128
-#define HISTORY_LIMIT 16
-
-static char COMMAND_HISTORY[HISTORY_LIMIT][INPUT_CAPACITY];
-static size_t history_count;
 
 static void shell_print_banner(void) {
-    terminal_writestring("NostaluxOS 64-bit demo kernel\n");
-    terminal_writestring("Welcome to the NostaluxOS console!\n");
+    terminal_writestring(OS_BANNER_LINE "\n");
+    terminal_writestring(OS_WELCOME_LINE "\n");
     terminal_writestring("Type 'help' to list available commands.\n");
+}
+
+static void shell_print_prompt(void) {
+    terminal_writestring(OS_PROMPT_TEXT);
 }
 
 static void command_help(const char* args) {
@@ -59,9 +61,9 @@ static void command_help(const char* args) {
 
 static void command_about(const char* args) {
     (void)args;
-    terminal_writestring("NostaluxOS is a hobby 64-bit operating system kernel.\n");
-    terminal_writestring("It focuses on simplicity and a retro-inspired feel.\n");
-    terminal_writestring("Right now it ships with a text console shell and a handful of utilities.\n");
+    terminal_writestring(OS_ABOUT_SUMMARY "\n");
+    terminal_writestring(OS_ABOUT_FOCUS "\n");
+    terminal_writestring(OS_ABOUT_FEATURES "\n");
 }
 
 static void command_clear(const char* args) {
@@ -95,16 +97,35 @@ static void command_color(const char* args) {
 }
 
 static void command_history(const char* args) {
-    (void)args;
-
     size_t count = keyboard_history_length();
     if (count == 0) {
         terminal_writestring("No commands have been run yet.\n");
         return;
     }
 
+    const char* cursor = kskip_spaces(args);
+    size_t start_index = 0;
+
+    if (*cursor != '\0') {
+        unsigned int limit = 0;
+        if (!kparse_uint(&cursor, &limit)) {
+            terminal_writestring("Usage: history [count]\n");
+            return;
+        }
+
+        cursor = kskip_spaces(cursor);
+        if (*cursor != '\0' || limit == 0) {
+            terminal_writestring("Usage: history [count]\n");
+            return;
+        }
+
+        if (limit < count) {
+            start_index = count - limit;
+        }
+    }
+
     terminal_writestring("Recent commands:\n");
-    for (size_t i = 0; i < count; i++) {
+    for (size_t i = start_index; i < count; i++) {
         const char* entry = keyboard_history_entry(i);
         if (entry == NULL) {
             continue;
@@ -125,11 +146,26 @@ static const char* COLOR_NAMES[16] = {
 static void command_palette(const char* args) {
     (void)args;
 
+    uint8_t original_fg = 0;
+    uint8_t original_bg = 0;
+    terminal_getcolors(&original_fg, &original_bg);
+
     terminal_writestring("VGA palette codes:\n");
     for (unsigned int i = 0; i < 16; i++) {
+        terminal_writestring("  ");
         terminal_write_uint(i);
-        terminal_writestring(": ");
+        if (i < 10) {
+            terminal_writestring(" ");
+        }
+        terminal_writestring(" - ");
         terminal_writestring(COLOR_NAMES[i]);
+        terminal_writestring("  ");
+
+        terminal_setcolors((uint8_t)i, original_bg);
+        terminal_write_char((char)0xDB);
+        terminal_write_char((char)0xDB);
+        terminal_setcolors(original_fg, original_bg);
+
         terminal_newline();
     }
 }
@@ -143,25 +179,6 @@ static void command_echo(const char* args) {
 
     terminal_writestring(message);
     terminal_newline();
-}
-
-static void history_record(const char* input) {
-    size_t trimmed_length = kstrlen(input);
-    if (trimmed_length == 0) {
-        return;
-    }
-
-    size_t slot = history_count % HISTORY_LIMIT;
-    size_t copy_length = trimmed_length;
-    if (copy_length >= INPUT_CAPACITY) {
-        copy_length = INPUT_CAPACITY - 1;
-    }
-
-    for (size_t i = 0; i < copy_length; i++) {
-        COMMAND_HISTORY[slot][i] = input[i];
-    }
-    COMMAND_HISTORY[slot][copy_length] = '\0';
-    history_count++;
 }
 
 static void execute_command(const char* input) {
@@ -196,7 +213,7 @@ void shell_run(void) {
     shell_print_banner();
 
     for (;;) {
-        terminal_writestring("\nostalux> ");
+        shell_print_prompt();
         keyboard_read_line(input, sizeof(input));
         execute_command(input);
     }
