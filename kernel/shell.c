@@ -91,16 +91,35 @@ static void command_color(const char* args) {
 }
 
 static void command_history(const char* args) {
-    (void)args;
-
     size_t count = keyboard_history_length();
     if (count == 0) {
         terminal_writestring("No commands have been run yet.\n");
         return;
     }
 
+    const char* cursor = kskip_spaces(args);
+    size_t start_index = 0;
+
+    if (*cursor != '\0') {
+        unsigned int limit = 0;
+        if (!kparse_uint(&cursor, &limit)) {
+            terminal_writestring("Usage: history [count]\n");
+            return;
+        }
+
+        cursor = kskip_spaces(cursor);
+        if (*cursor != '\0' || limit == 0) {
+            terminal_writestring("Usage: history [count]\n");
+            return;
+        }
+
+        if (limit < count) {
+            start_index = count - limit;
+        }
+    }
+
     terminal_writestring("Recent commands:\n");
-    for (size_t i = 0; i < count; i++) {
+    for (size_t i = start_index; i < count; i++) {
         const char* entry = keyboard_history_entry(i);
         if (entry == NULL) {
             continue;

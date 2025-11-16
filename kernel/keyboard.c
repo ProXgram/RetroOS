@@ -74,6 +74,15 @@ static size_t history_count;
 static size_t history_view_index;
 static const char history_empty_line[] = "";
 
+static bool history_matches_last(const char* line) {
+    if (history_count == 0) {
+        return false;
+    }
+
+    size_t last_slot = (history_count - 1) % KEYBOARD_HISTORY_LIMIT;
+    return kstrcmp(history_storage[last_slot], line) == 0;
+}
+
 static uint16_t keyboard_read_scancode(void) {
     uint16_t prefix = 0;
     for (;;) {
@@ -166,6 +175,11 @@ static const char* history_entry_absolute(size_t absolute_index) {
 void keyboard_history_record(const char* line) {
     size_t length = kstrlen(line);
     if (length == 0) {
+        return;
+    }
+
+    if (history_matches_last(line)) {
+        history_view_index = history_count;
         return;
     }
 
