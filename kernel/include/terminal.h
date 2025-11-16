@@ -4,7 +4,7 @@
 #include <stddef.h>
 #include <stdint.h>
 
-void terminal_initialize(void);
+void terminal_initialize(uint32_t width, uint32_t height);
 void terminal_clear(void);
 void terminal_setcolors(uint8_t fg, uint8_t bg);
 void terminal_write_char(char c);

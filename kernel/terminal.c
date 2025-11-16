@@ -8,6 +8,15 @@ static size_t terminal_row;
 static size_t terminal_column;
 static uint8_t terminal_color;
 static uint16_t* terminal_buffer;
+static size_t terminal_width = VGA_WIDTH;
+static size_t terminal_height = VGA_HEIGHT;
+
+enum terminal_mode {
+    TERMINAL_MODE_VGA_TEXT = 0,
+    TERMINAL_MODE_FRAMEBUFFER,
+};
+
+static enum terminal_mode current_mode = TERMINAL_MODE_VGA_TEXT;
 
 static inline void outb(uint16_t port, uint8_t value) {
     __asm__ volatile ("outb %0, %1" : : "a"(value), "Nd"(port));
@@ -30,32 +39,72 @@ static void terminal_update_cursor(void) {
 }
 
 static void scroll_if_needed(void) {
-    if (terminal_row < VGA_HEIGHT) {
+    if (terminal_row < terminal_height) {
         return;
     }
 
     const size_t row_size = VGA_WIDTH;
-    const size_t total_cells = VGA_WIDTH * VGA_HEIGHT;
+    const size_t used_rows = terminal_height;
+    const size_t total_cells = used_rows * row_size;
 
-    for (size_t i = 0; i < (VGA_HEIGHT - 1) * row_size; i++) {
+    for (size_t i = 0; i < (used_rows - 1) * row_size; i++) {
         terminal_buffer[i] = terminal_buffer[i + row_size];
     }
 
-    for (size_t i = (VGA_HEIGHT - 1) * row_size; i < total_cells; i++) {
+    for (size_t i = (used_rows - 1) * row_size; i < total_cells; i++) {
         terminal_buffer[i] = vga_entry(' ', terminal_color);
     }
 
-    terminal_row = VGA_HEIGHT - 1;
+    terminal_row = terminal_height - 1;
 }
 
-void terminal_initialize(void) {
+static enum terminal_mode detect_terminal_mode(uint32_t width, uint32_t height) {
+    (void)width;
+    (void)height;
+
+    /* Placeholder: once the bootloader exposes framebuffer details we can
+     * select TERMINAL_MODE_FRAMEBUFFER here. */
+    return TERMINAL_MODE_VGA_TEXT;
+}
+
+static size_t clamp_dimension(uint32_t reported, size_t fallback, size_t limit) {
+    size_t value = fallback;
+
+    if (reported > 0) {
+        value = reported;
+    }
+
+    if (value > limit) {
+        value = limit;
+    }
+
+    return value;
+}
+
+static void configure_geometry(uint32_t width, uint32_t height) {
+    terminal_width = clamp_dimension(width, VGA_WIDTH, VGA_WIDTH);
+    terminal_height = clamp_dimension(height, VGA_HEIGHT, VGA_HEIGHT);
+
+    if (terminal_height == 0) {
+        terminal_height = VGA_HEIGHT;
+    }
+}
+
+void terminal_initialize(uint32_t width, uint32_t height) {
     terminal_row = 0;
     terminal_column = 0;
     terminal_color = make_color(0x0F, 0x00);
     terminal_buffer = VGA_MEMORY;
 
-    for (size_t y = 0; y < VGA_HEIGHT; y++) {
-        for (size_t x = 0; x < VGA_WIDTH; x++) {
+    current_mode = detect_terminal_mode(width, height);
+    configure_geometry(width, height);
+
+    if (current_mode == TERMINAL_MODE_FRAMEBUFFER) {
+        /* Placeholder for a future framebuffer-backed terminal path. */
+    }
+
+    for (size_t y = 0; y < terminal_height; y++) {
+        for (size_t x = 0; x < terminal_width; x++) {
             const size_t index = y * VGA_WIDTH + x;
             terminal_buffer[index] = vga_entry(' ', terminal_color);
         }
@@ -68,8 +117,8 @@ void terminal_clear(void) {
     terminal_row = 0;
     terminal_column = 0;
 
-    for (size_t y = 0; y < VGA_HEIGHT; y++) {
-        for (size_t x = 0; x < VGA_WIDTH; x++) {
+    for (size_t y = 0; y < terminal_height; y++) {
+        for (size_t x = 0; x < terminal_width; x++) {
             const size_t index = y * VGA_WIDTH + x;
             terminal_buffer[index] = vga_entry(' ', terminal_color);
         }
@@ -83,6 +132,9 @@ void terminal_setcolors(uint8_t fg, uint8_t bg) {
 }
 
 static void terminal_setcell(size_t x, size_t y, char c) {
+    if (x >= terminal_width || y >= terminal_height) {
+        return;
+    }
     const size_t index = y * VGA_WIDTH + x;
     terminal_buffer[index] = vga_entry(c, terminal_color);
 }
@@ -116,7 +168,7 @@ void terminal_write_char(char c) {
 
     terminal_setcell(terminal_column, terminal_row, c);
     terminal_column++;
-    if (terminal_column >= VGA_WIDTH) {
+    if (terminal_column >= terminal_width) {
         terminal_column = 0;
         terminal_row++;
         scroll_if_needed();

@@ -69,6 +69,21 @@ This removes all files under the `build/` directory.
 
 Feel free to hack on the kernel, expand the bootloader, or add new features to MemoriaOS!
 
+## Display mode notes
+
+The bootloader now reports framebuffer geometry through the `BootInfo` structure
+and the kernel caches it before handing the dimensions to
+`terminal_initialize()`.
+The current implementation in `kernel/terminal.c` still targets the classic
+80×25 VGA text buffer, so it clamps the reported width/height to that region and
+updates only the visible cells.
+
+To experiment with wider or graphical modes, hook your detection logic into the
+`detect_terminal_mode()` helper inside `kernel/terminal.c`.  The function already
+selects a `TERMINAL_MODE_*` enum and provides a placeholder branch in
+`terminal_initialize()` so you can wire up a framebuffer-backed renderer without
+reworking the rest of the terminal API.
+
 ## Resolving GitHub merge conflicts
 
 If GitHub reports conflicts when you open a pull request, bring your branch up to date locally and resolve them before pushing:
