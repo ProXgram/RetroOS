@@ -44,6 +44,7 @@ static void shell_print_banner(void) {
 }
 
 static void shell_print_prompt(void) {
+    terminal_newline();
     terminal_writestring(OS_PROMPT_TEXT);
 }
 
