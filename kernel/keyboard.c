@@ -7,12 +7,6 @@
 #include "kstring.h"
 #include "terminal.h"
 
-static inline uint8_t inb(uint16_t port) {
-    uint8_t value;
-    __asm__ volatile ("inb %1, %0" : "=a"(value) : "dN"(port));
-    return value;
-}
-
 struct keymap_entry {
     char normal;
     char shifted;

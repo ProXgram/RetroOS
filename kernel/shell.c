@@ -34,10 +34,6 @@ static const struct shell_command COMMANDS[] = {
 #define COMMAND_COUNT (sizeof(COMMANDS) / sizeof(COMMANDS[0]))
 
 #define INPUT_CAPACITY 128
-#define HISTORY_LIMIT 16
-
-static char COMMAND_HISTORY[HISTORY_LIMIT][INPUT_CAPACITY];
-static size_t history_count;
 
 static void shell_print_banner(void) {
     terminal_writestring("NostaluxOS 64-bit demo kernel\n");
@@ -143,25 +139,6 @@ static void command_echo(const char* args) {
 
     terminal_writestring(message);
     terminal_newline();
-}
-
-static void history_record(const char* input) {
-    size_t trimmed_length = kstrlen(input);
-    if (trimmed_length == 0) {
-        return;
-    }
-
-    size_t slot = history_count % HISTORY_LIMIT;
-    size_t copy_length = trimmed_length;
-    if (copy_length >= INPUT_CAPACITY) {
-        copy_length = INPUT_CAPACITY - 1;
-    }
-
-    for (size_t i = 0; i < copy_length; i++) {
-        COMMAND_HISTORY[slot][i] = input[i];
-    }
-    COMMAND_HISTORY[slot][copy_length] = '\0';
-    history_count++;
 }
 
 static void execute_command(const char* input) {
