@@ -1,9 +1,9 @@
-
 BITS 64
 
 section .text
     global _start
     extern kmain
+    extern gdt_init
     extern interrupts_init
     extern __bss_start
     extern __bss_end
@@ -18,6 +18,7 @@ _start:
     xor rax, rax
     rep stosb
 
+    call gdt_init
     call interrupts_init
 
     mov rdi, r12                ; restore BootInfo pointer
