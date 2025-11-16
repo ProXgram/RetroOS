@@ -134,6 +134,12 @@ protected_mode_entry:
     or eax, (1 << 5) | (1 << 9) | (1 << 10) ; enable PAE and SSE support
     mov cr4, eax
 
+    fninit                          ; make sure the FPU/SSE state is clean
+    mov eax, cr0
+    and eax, ~((1 << 2) | (1 << 3)) ; clear EM/TS so FP instructions work
+    or eax, (1 << 1)                ; set MP for proper FPU error reporting
+    mov cr0, eax
+
     mov ecx, 0xC0000080
     rdmsr
     or eax, (1 << 8)
