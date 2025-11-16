@@ -19,31 +19,40 @@ OS_IMAGE := $(BUILD_DIR)/RetroOS.img
 KERNEL_SRCS := $(wildcard kernel/*.c)
 KERNEL_OBJS := $(patsubst kernel/%.c,$(BUILD_DIR)/%.o,$(KERNEL_SRCS))
 
-.PHONY: all clean run
+.PHONY: all clean run check-conflicts
 
-all: $(OS_IMAGE)
+all: check-conflicts $(OS_IMAGE)
+
+check-conflicts:
+	@$(CONFLICT_CHECK)
 
 $(BUILD_DIR):
 	@mkdir -p $(BUILD_DIR)
+
 
 $(KERNEL_ELF): kernel/entry.asm $(KERNEL_OBJS) kernel/linker.ld | $(BUILD_DIR)
 	$(NASM) -f elf64 kernel/entry.asm -o $(BUILD_DIR)/entry.o
 	$(LD) -nostdlib -z max-page-size=0x1000 -T kernel/linker.ld -o $@ $(BUILD_DIR)/entry.o $(KERNEL_OBJS)
 
 $(BUILD_DIR)/%.o: kernel/%.c | $(BUILD_DIR)
+	@$(CONFLICT_CHECK)
 	$(CC) $(CFLAGS) -c $< -o $@
 
 $(KERNEL_BIN): $(KERNEL_ELF) | $(BUILD_DIR)
 	$(OBJCOPY) -O binary $(KERNEL_ELF) $@
 
+
 $(STAGE2_BIN): bootloader/stage2.asm $(KERNEL_BIN) | $(BUILD_DIR)
+	@$(CONFLICT_CHECK)
 	@KERNEL_SIZE=$$(stat -c%s $(KERNEL_BIN)); \
 	$(NASM) -f bin $(NASMFLAGS) -DKERNEL_SIZE_BYTES=$$KERNEL_SIZE bootloader/stage2.asm -o $@
 
 $(PAYLOAD_BIN): $(STAGE2_BIN) $(KERNEL_BIN) | $(BUILD_DIR)
 	cat $(STAGE2_BIN) $(KERNEL_BIN) > $@
 
+
 $(BOOT_BIN): bootloader/boot.asm $(PAYLOAD_BIN) | $(BUILD_DIR)
+	@$(CONFLICT_CHECK)
 	@TOTAL_SIZE=$$(stat -c%s $(PAYLOAD_BIN)); \
 	TOTAL_SECTORS=$$(( (TOTAL_SIZE + 511) / 512 )); \
 	$(NASM) -f bin $(NASMFLAGS) -DTOTAL_SECTORS=$$TOTAL_SECTORS bootloader/boot.asm -o $@
@@ -60,5 +69,5 @@ $(OS_IMAGE): $(BOOT_BIN) $(PAYLOAD_BIN)
 clean:
 	rm -rf $(BUILD_DIR)
 
-run: $(OS_IMAGE)
+run: check-conflicts $(OS_IMAGE)
 	qemu-system-x86_64 -drive format=raw,file=$(OS_IMAGE)
