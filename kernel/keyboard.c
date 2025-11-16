@@ -7,12 +7,6 @@
 #include "kstring.h"
 #include "terminal.h"
 
-static inline uint8_t inb(uint16_t port) {
-    uint8_t value;
-    __asm__ volatile ("inb %1, %0" : "=a"(value) : "dN"(port));
-    return value;
-}
-
 struct keymap_entry {
     char normal;
     char shifted;
@@ -79,6 +73,15 @@ static char history_storage[KEYBOARD_HISTORY_LIMIT][KEYBOARD_MAX_LINE];
 static size_t history_count;
 static size_t history_view_index;
 static const char history_empty_line[] = "";
+
+static bool history_matches_last(const char* line) {
+    if (history_count == 0) {
+        return false;
+    }
+
+    size_t last_slot = (history_count - 1) % KEYBOARD_HISTORY_LIMIT;
+    return kstrcmp(history_storage[last_slot], line) == 0;
+}
 
 static uint16_t keyboard_read_scancode(void) {
     uint16_t prefix = 0;
@@ -172,6 +175,11 @@ static const char* history_entry_absolute(size_t absolute_index) {
 void keyboard_history_record(const char* line) {
     size_t length = kstrlen(line);
     if (length == 0) {
+        return;
+    }
+
+    if (history_matches_last(line)) {
+        history_view_index = history_count;
         return;
     }
 
