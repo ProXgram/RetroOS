@@ -27,6 +27,10 @@ static void command_color(const char* args);
 static void command_echo(const char* args);
 static void command_ls(const char* args);
 static void command_cat(const char* args);
+static void command_touch(const char* args);
+static void command_write(const char* args);
+static void command_append(const char* args);
+static void command_rm(const char* args);
 static void command_sysinfo(const char* args);
 static void command_logs(const char* args);
 
@@ -42,6 +46,10 @@ static const struct shell_command COMMANDS[] = {
     {"color", command_color, "Update text colors (0-15)"},
     {"ls", command_ls, "List files in the virtual FS"},
     {"cat", command_cat, "Print a file from the virtual FS"},
+    {"touch", command_touch, "Create an empty file"},
+    {"write", command_write, "Overwrite a file with new text"},
+    {"append", command_append, "Append text to a file"},
+    {"rm", command_rm, "Remove a file"},
     {"history", command_history, "Show recent commands"},
     {"palette", command_palette, "Display VGA color codes"},
     {"sysinfo", command_sysinfo, "Display hardware and memory info"},
@@ -151,6 +159,244 @@ static void command_history(const char* args) {
         terminal_writestring(entry);
         terminal_newline();
     }
+}
+
+static void command_ls(const char* args) {
+    (void)args;
+
+    size_t count = fs_file_count();
+    if (count == 0) {
+        terminal_writestring("No files are available.\n");
+        return;
+    }
+
+    terminal_writestring("Filesystem contents:\n");
+    for (size_t i = 0; i < count; i++) {
+        const struct fs_file* entry = fs_file_at(i);
+        if (entry == NULL) {
+            continue;
+        }
+        terminal_writestring("  ");
+        terminal_writestring(entry->name);
+        terminal_writestring(" (");
+        terminal_write_uint((unsigned int)entry->size);
+        terminal_writestring(" bytes)");
+        if (entry->size == 0) {
+            terminal_writestring(" [empty]");
+        }
+        terminal_newline();
+    }
+}
+
+static bool parse_filename_token(const char* args, char* dest, size_t dest_size, const char** remainder) {
+    if (dest == NULL || dest_size == 0) {
+        return false;
+    }
+
+    const char* start = kskip_spaces(args);
+    if (*start == '\0') {
+        return false;
+    }
+
+    const char* end = start;
+    while (*end != '\0' && *end != ' ' && *end != '\t') {
+        end++;
+    }
+
+    size_t length = (size_t)(end - start);
+    if (length == 0 || length >= dest_size) {
+        return false;
+    }
+
+    for (size_t i = 0; i < length; i++) {
+        dest[i] = start[i];
+    }
+    dest[length] = '\0';
+
+    if (remainder != NULL) {
+        *remainder = end;
+    }
+
+    return true;
+}
+
+static void command_cat(const char* args) {
+    char filename[FS_MAX_FILENAME];
+    if (!parse_filename_token(args, filename, sizeof(filename), NULL)) {
+        terminal_writestring("Usage: cat <filename>\n");
+        return;
+    }
+
+    const struct fs_file* entry = fs_find(filename);
+    if (entry == NULL) {
+        terminal_writestring("File not found.\n");
+        return;
+    }
+
+    if (entry->size == 0) {
+        terminal_writestring("<empty file>\n");
+        return;
+    }
+
+    terminal_writestring(entry->data);
+}
+
+static void command_touch(const char* args) {
+    char filename[FS_MAX_FILENAME];
+    if (!parse_filename_token(args, filename, sizeof(filename), NULL)) {
+        terminal_writestring("Usage: touch <filename>\n");
+        return;
+    }
+
+    if (fs_touch(filename)) {
+        terminal_writestring("File ready: ");
+        terminal_writestring(filename);
+        terminal_newline();
+    } else {
+        terminal_writestring("Unable to create file (maybe disk is full or name is invalid).\n");
+    }
+}
+
+static void command_write(const char* args) {
+    char filename[FS_MAX_FILENAME];
+    const char* remainder = NULL;
+    if (!parse_filename_token(args, filename, sizeof(filename), &remainder)) {
+        terminal_writestring("Usage: write <filename> <text>\n");
+        return;
+    }
+
+    const char* text = kskip_spaces(remainder);
+    if (*text == '\0') {
+        terminal_writestring("Usage: write <filename> <text>\n");
+        return;
+    }
+
+    if (fs_write(filename, text)) {
+        terminal_writestring("Wrote ");
+        terminal_write_uint((unsigned int)kstrlen(text));
+        terminal_writestring(" bytes to ");
+        terminal_writestring(filename);
+        terminal_newline();
+    } else {
+        terminal_writestring("Write failed. Ensure the file name is valid and the text fits.\n");
+    }
+}
+
+static void command_append(const char* args) {
+    char filename[FS_MAX_FILENAME];
+    const char* remainder = NULL;
+    if (!parse_filename_token(args, filename, sizeof(filename), &remainder)) {
+        terminal_writestring("Usage: append <filename> <text>\n");
+        return;
+    }
+
+    const char* text = kskip_spaces(remainder);
+    if (*text == '\0') {
+        terminal_writestring("Usage: append <filename> <text>\n");
+        return;
+    }
+
+    if (fs_append(filename, text)) {
+        terminal_writestring("Appended ");
+        terminal_write_uint((unsigned int)kstrlen(text));
+        terminal_writestring(" bytes to ");
+        terminal_writestring(filename);
+        terminal_newline();
+    } else {
+        terminal_writestring("Append failed. Either the file name is invalid or there isn't enough space.\n");
+    }
+}
+
+static void command_rm(const char* args) {
+    char filename[FS_MAX_FILENAME];
+    if (!parse_filename_token(args, filename, sizeof(filename), NULL)) {
+        terminal_writestring("Usage: rm <filename>\n");
+        return;
+    }
+
+    if (fs_remove(filename)) {
+        terminal_writestring("Removed ");
+        terminal_writestring(filename);
+        terminal_newline();
+    } else {
+        terminal_writestring("File not found.\n");
+    }
+}
+
+static void command_sysinfo(const char* args) {
+    (void)args;
+
+    const struct BootInfo* boot = system_boot_info();
+    const struct system_profile* profile = system_profile_info();
+
+    terminal_writestring("Display: ");
+    terminal_write_uint(boot->width);
+    terminal_writestring("x");
+    terminal_write_uint(boot->height);
+    terminal_writestring(" pixels, pitch=");
+    terminal_write_uint(boot->pitch);
+    terminal_writestring(" bytes\n");
+
+    terminal_writestring("Framebuffer @ 0x");
+    // Print framebuffer address in hex (16 digits)
+    for (int shift = 60; shift >= 0; shift -= 4) {
+        uint8_t nibble = (uint8_t)((boot->framebuffer >> shift) & 0xF);
+        char c = (nibble < 10) ? (char)('0' + nibble) : (char)('A' + (nibble - 10));
+        terminal_write_char(c);
+    }
+    terminal_newline();
+
+    terminal_writestring("Memory: ");
+    terminal_write_uint(profile->memory_used_kb);
+    terminal_writestring(" KiB used / ");
+    terminal_write_uint(profile->memory_total_kb);
+    terminal_writestring(" KiB total\n");
+
+    terminal_writestring("Architecture: ");
+    terminal_writestring(profile->architecture);
+    terminal_newline();
+}
+
+static void command_logs(const char* args) {
+    (void)args;
+
+    size_t count = syslog_length();
+    if (count == 0) {
+        terminal_writestring("No log entries recorded yet.\n");
+        return;
+    }
+
+    terminal_writestring("Recent system logs:\n");
+    for (size_t i = 0; i < count; i++) {
+        const char* entry = syslog_entry(i);
+        if (entry == NULL) {
+            continue;
+        }
+        terminal_writestring("  ");
+        terminal_writestring(entry);
+        terminal_newline();
+    }
+}
+
+static void log_command_invocation(const char* command_name) {
+    static const char prefix[] = "Command: ";
+    char buffer[80];
+    size_t index = 0;
+
+    for (size_t i = 0; prefix[i] != '\0' && index + 1 < sizeof(buffer); i++) {
+        buffer[index++] = prefix[i];
+    }
+
+    if (command_name == NULL) {
+        command_name = "<null>";
+    }
+
+    for (size_t i = 0; command_name[i] != '\0' && index + 1 < sizeof(buffer); i++) {
+        buffer[index++] = command_name[i];
+    }
+
+    buffer[index] = '\0';
+    syslog_write(buffer);
 }
 
 static const char* COLOR_NAMES[16] = {
