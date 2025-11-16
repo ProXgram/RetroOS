@@ -11,6 +11,7 @@ static uint8_t terminal_color;
 static uint16_t* terminal_buffer;
 static size_t terminal_width = VGA_WIDTH;
 static size_t terminal_height = VGA_HEIGHT;
+static size_t terminal_batch_depth;
 
 enum terminal_mode {
     TERMINAL_MODE_VGA_TEXT = 0,
@@ -28,11 +29,29 @@ static inline uint8_t make_color(uint8_t fg, uint8_t bg) {
 }
 
 static void terminal_update_cursor(void) {
+    if (terminal_batch_depth > 0) {
+        return;
+    }
     const uint16_t position = (uint16_t)(terminal_row * VGA_WIDTH + terminal_column);
     outb(0x3D4, 0x0F);
     outb(0x3D5, (uint8_t)(position & 0xFF));
     outb(0x3D4, 0x0E);
     outb(0x3D5, (uint8_t)((position >> 8) & 0xFF));
+}
+
+void terminal_begin_batch(void) {
+    terminal_batch_depth++;
+}
+
+void terminal_end_batch(void) {
+    if (terminal_batch_depth == 0) {
+        return;
+    }
+
+    terminal_batch_depth--;
+    if (terminal_batch_depth == 0) {
+        terminal_update_cursor();
+    }
 }
 
 static void scroll_if_needed(void) {
