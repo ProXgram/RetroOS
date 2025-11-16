@@ -33,11 +33,9 @@ static const struct shell_command COMMANDS[] = {
 };
 #define COMMAND_COUNT (sizeof(COMMANDS) / sizeof(COMMANDS[0]))
 
-#define INPUT_CAPACITY 128
-#define HISTORY_LIMIT 16
-
-static char COMMAND_HISTORY[HISTORY_LIMIT][INPUT_CAPACITY];
-static size_t history_count;
+enum {
+    INPUT_CAPACITY = KEYBOARD_MAX_LINE,
+};
 
 static void shell_print_banner(void) {
     terminal_writestring("MemoriaOS 64-bit demo kernel\n");
@@ -97,21 +95,21 @@ static void command_color(const char* args) {
 static void command_history(const char* args) {
     (void)args;
 
-    if (history_count == 0) {
+    size_t count = keyboard_history_length();
+    if (count == 0) {
         terminal_writestring("No commands have been run yet.\n");
         return;
     }
 
-    size_t start = 0;
-    if (history_count > HISTORY_LIMIT) {
-        start = history_count - HISTORY_LIMIT;
-    }
-
     terminal_writestring("Recent commands:\n");
-    for (size_t i = start; i < history_count; i++) {
-        terminal_write_uint(i - start + 1);
+    for (size_t i = 0; i < count; i++) {
+        const char* entry = keyboard_history_entry(i);
+        if (entry == NULL) {
+            continue;
+        }
+        terminal_write_uint(i + 1);
         terminal_writestring(". ");
-        terminal_writestring(COMMAND_HISTORY[i % HISTORY_LIMIT]);
+        terminal_writestring(entry);
         terminal_newline();
     }
 }
@@ -145,32 +143,13 @@ static void command_echo(const char* args) {
     terminal_newline();
 }
 
-static void history_record(const char* input) {
-    size_t trimmed_length = kstrlen(input);
-    if (trimmed_length == 0) {
-        return;
-    }
-
-    size_t slot = history_count % HISTORY_LIMIT;
-    size_t copy_length = trimmed_length;
-    if (copy_length >= INPUT_CAPACITY) {
-        copy_length = INPUT_CAPACITY - 1;
-    }
-
-    for (size_t i = 0; i < copy_length; i++) {
-        COMMAND_HISTORY[slot][i] = input[i];
-    }
-    COMMAND_HISTORY[slot][copy_length] = '\0';
-    history_count++;
-}
-
 static void execute_command(const char* input) {
     const char* trimmed = kskip_spaces(input);
     if (*trimmed == '\0') {
         return;
     }
 
-    history_record(trimmed);
+    keyboard_history_record(trimmed);
 
     const char* cursor = trimmed;
     while (*cursor != '\0' && *cursor != ' ' && *cursor != '\t') {
