@@ -211,11 +211,11 @@ DECLARE_NOERR_HANDLER(29);
 DECLARE_NOERR_HANDLER(30);
 DECLARE_NOERR_HANDLER(31);
 
-static void idt_set_gate(uint8_t vector, void* handler, uint8_t ist_index) {
+static void idt_set_gate(uint8_t vector, void* handler) {
     uint64_t address = (uint64_t)handler;
     g_idt[vector].offset_low = (uint16_t)(address & 0xFFFF);
     g_idt[vector].selector = 0x08;
-    g_idt[vector].ist = (uint8_t)(ist_index & 0x7);
+    g_idt[vector].ist = 0;
     g_idt[vector].type_attr = 0x8E;
     g_idt[vector].offset_mid = (uint16_t)((address >> 16) & 0xFFFF);
     g_idt[vector].offset_high = (uint32_t)((address >> 32) & 0xFFFFFFFF);
@@ -223,38 +223,38 @@ static void idt_set_gate(uint8_t vector, void* handler, uint8_t ist_index) {
 }
 
 void interrupts_init(void) {
-    idt_set_gate(0, handler_0, 0);
-    idt_set_gate(1, handler_1, 0);
-    idt_set_gate(2, handler_2, 0);
-    idt_set_gate(3, handler_3, 0);
-    idt_set_gate(4, handler_4, 0);
-    idt_set_gate(5, handler_5, 0);
-    idt_set_gate(6, handler_6, 0);
-    idt_set_gate(7, handler_7, 0);
-    idt_set_gate(8, handler_8, 1);
-    idt_set_gate(9, handler_9, 0);
-    idt_set_gate(10, handler_10, 0);
-    idt_set_gate(11, handler_11, 0);
-    idt_set_gate(12, handler_12, 0);
-    idt_set_gate(13, handler_13, 0);
-    idt_set_gate(14, handler_14, 0);
-    idt_set_gate(15, handler_15, 0);
-    idt_set_gate(16, handler_16, 0);
-    idt_set_gate(17, handler_17, 0);
-    idt_set_gate(18, handler_18, 0);
-    idt_set_gate(19, handler_19, 0);
-    idt_set_gate(20, handler_20, 0);
-    idt_set_gate(21, handler_21, 0);
-    idt_set_gate(22, handler_22, 0);
-    idt_set_gate(23, handler_23, 0);
-    idt_set_gate(24, handler_24, 0);
-    idt_set_gate(25, handler_25, 0);
-    idt_set_gate(26, handler_26, 0);
-    idt_set_gate(27, handler_27, 0);
-    idt_set_gate(28, handler_28, 0);
-    idt_set_gate(29, handler_29, 0);
-    idt_set_gate(30, handler_30, 0);
-    idt_set_gate(31, handler_31, 0);
+    idt_set_gate(0, handler_0);
+    idt_set_gate(1, handler_1);
+    idt_set_gate(2, handler_2);
+    idt_set_gate(3, handler_3);
+    idt_set_gate(4, handler_4);
+    idt_set_gate(5, handler_5);
+    idt_set_gate(6, handler_6);
+    idt_set_gate(7, handler_7);
+    idt_set_gate(8, handler_8);
+    idt_set_gate(9, handler_9);
+    idt_set_gate(10, handler_10);
+    idt_set_gate(11, handler_11);
+    idt_set_gate(12, handler_12);
+    idt_set_gate(13, handler_13);
+    idt_set_gate(14, handler_14);
+    idt_set_gate(15, handler_15);
+    idt_set_gate(16, handler_16);
+    idt_set_gate(17, handler_17);
+    idt_set_gate(18, handler_18);
+    idt_set_gate(19, handler_19);
+    idt_set_gate(20, handler_20);
+    idt_set_gate(21, handler_21);
+    idt_set_gate(22, handler_22);
+    idt_set_gate(23, handler_23);
+    idt_set_gate(24, handler_24);
+    idt_set_gate(25, handler_25);
+    idt_set_gate(26, handler_26);
+    idt_set_gate(27, handler_27);
+    idt_set_gate(28, handler_28);
+    idt_set_gate(29, handler_29);
+    idt_set_gate(30, handler_30);
+    idt_set_gate(31, handler_31);
 
     const struct idt_descriptor descriptor = {
         .limit = (uint16_t)(sizeof(g_idt) - 1),
