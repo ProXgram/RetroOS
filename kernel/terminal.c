@@ -211,3 +211,35 @@ void terminal_write_uint(unsigned int value) {
 void terminal_newline(void) {
     terminal_write_char('\n');
 }
+
+void terminal_move_cursor_left(size_t count) {
+    while (count > 0) {
+        if (terminal_column > 0) {
+            terminal_column--;
+        } else if (terminal_row > 0) {
+            terminal_row--;
+            terminal_column = terminal_width - 1;
+        } else {
+            break;
+        }
+        count--;
+    }
+    terminal_update_cursor();
+}
+
+void terminal_move_cursor_right(size_t count) {
+    while (count > 0) {
+        if (terminal_column + 1 < terminal_width) {
+            terminal_column++;
+        } else {
+            if (terminal_row + 1 >= terminal_height) {
+                terminal_column = terminal_width - 1;
+                break;
+            }
+            terminal_column = 0;
+            terminal_row++;
+        }
+        count--;
+    }
+    terminal_update_cursor();
+}
