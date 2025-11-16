@@ -128,6 +128,15 @@ void terminal_setcolors(uint8_t fg, uint8_t bg) {
     terminal_color = make_color(fg, bg);
 }
 
+void terminal_getcolors(uint8_t* fg, uint8_t* bg) {
+    if (fg != NULL) {
+        *fg = (uint8_t)(terminal_color & 0x0F);
+    }
+    if (bg != NULL) {
+        *bg = (uint8_t)((terminal_color >> 4) & 0x0F);
+    }
+}
+
 static void terminal_setcell(size_t x, size_t y, char c) {
     if (x >= terminal_width || y >= terminal_height) {
         return;

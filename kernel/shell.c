@@ -147,11 +147,26 @@ static const char* COLOR_NAMES[16] = {
 static void command_palette(const char* args) {
     (void)args;
 
+    uint8_t original_fg = 0;
+    uint8_t original_bg = 0;
+    terminal_getcolors(&original_fg, &original_bg);
+
     terminal_writestring("VGA palette codes:\n");
     for (unsigned int i = 0; i < 16; i++) {
+        terminal_writestring("  ");
         terminal_write_uint(i);
-        terminal_writestring(": ");
+        if (i < 10) {
+            terminal_writestring(" ");
+        }
+        terminal_writestring(" - ");
         terminal_writestring(COLOR_NAMES[i]);
+        terminal_writestring("  ");
+
+        terminal_setcolors((uint8_t)i, original_bg);
+        terminal_write_char((char)0xDB);
+        terminal_write_char((char)0xDB);
+        terminal_setcolors(original_fg, original_bg);
+
         terminal_newline();
     }
 }
