@@ -1,19 +1,41 @@
-# RetroOS
+# NostaluxOS
 
-This is my first repository created to harbor my first hobby OS.
+NostaluxOS is a deliberately small x86-64 hobby operating system with a nostalgic spin: it boots straight to a VGA text console,
+shows a retro banner, and drops you into a built-in shell. The goal is to keep the code approachable while capturing the charm of
+classic PCs.
 
-The name of the operating system is not yet chosen upon, therefore it is defaulted to RetroOS.
+This is my first operating-system project, so the repository doubles as a sandbox for experimenting with bootloaders, kernel
+structure, and user interaction.
 
-RetroOS seeks to be a modern x86-64 OS written in C with a retro style to it, restoring the golden era of operating systems
-with a nostalgic feel and a focus on simplicity.
+## Current features
 
-This operating system focuses on retro elements of an operating system, as well as the portability of retro games.
+- **Handmade boot flow** – a two-stage loader pulls the 64-bit kernel into memory and switches the CPU into long mode.
+- **Text-mode terminal** – the kernel owns the VGA text buffer, tracks the hardware cursor, and lets you change the foreground
+  and background colors.
+- **Interactive shell** – type `help` to discover commands such as `about`, `clear`, `color`, `history`, `palette`, and `echo`.
+  The new `history` command shows the most recent inputs while `palette` lists every VGA color code so you can theme the
+  console quickly.
+
+More functionality will follow over time, but these pieces make NostaluxOS fun to poke at immediately after boot.
+
+## What NostaluxOS does today
+
+1. **Boot flow and hand-off** – the handcrafted boot sector loads `stage2`, copies the 64-bit kernel into memory, flips the CPU
+   into long mode, and jumps to the kernel entry point.
+2. **Text terminal** – once inside the kernel we clear the VGA text buffer, set up the hardware cursor, and accept character
+   writes from anywhere in the kernel. Cursor updates keep the caret in sync with whatever the terminal prints.
+3. **Shell interaction** – `kmain` immediately launches the mini shell where you can run:
+   - `help`, `about`, `clear`, `color <fg> <bg>`
+   - `echo <text>`, `history`, and `palette` for quick experimentation
+   The shell keeps the last few commands in memory and shows them via `history`, so you can quickly recall what you typed.
+
+This is intentionally a tiny playground, but it already exercises the boot pipeline, keyboard input, and VGA output end to end.
 
 ## Getting started
 
-The repository now contains a handcrafted bootloader and a very small 64-bit kernel. The bootloader loads the kernel into
-memory, switches the CPU into long mode, and jumps into the kernel. Once running, the kernel clears the VGA text console,
-prints a welcome message, and waits for a line of keyboard input before echoing it back to the user.
+The repository contains a handcrafted bootloader and a tiny 64-bit kernel. The bootloader loads the kernel into memory,
+switches the CPU into long mode, and jumps into the kernel. Once running, the kernel clears the VGA text console, prints a
+welcome message, and waits for commands at the `nostalux>` prompt.
 
 ### Requirements
 
@@ -31,7 +53,7 @@ The build has been tested with the GNU toolchain on Linux. You will need:
 make
 ```
 
-The command produces `build/RetroOS.img`, a raw disk image that contains the boot sector, bootloader, and kernel.
+The command produces `build/NostaluxOS.img`, a raw disk image that contains the boot sector, bootloader, and kernel.
 
 ### Run in QEMU
 
@@ -39,8 +61,8 @@ The command produces `build/RetroOS.img`, a raw disk image that contains the boo
 make run
 ```
 
-The QEMU window will display the boot banner, show "Hello, world!", and prompt for input. Type a message and press Enter to
-see it echoed back by the kernel.
+The QEMU window will display the boot banner and drop you into the tiny NostaluxOS shell. Type `help` to see the available
+commands (such as `about`, `clear`, `color`, `history`, `palette`, or `echo`).
 
 ### Cleaning
 
@@ -56,7 +78,21 @@ This removes all files under the `build/` directory.
 - `kernel/` — 64-bit freestanding kernel sources and linker script.
 - `Makefile` — build orchestration that assembles the boot stages, compiles the kernel, and produces a bootable image.
 
-Feel free to hack on the kernel, expand the bootloader, or add new features to RetroOS!
+Feel free to hack on the kernel, expand the bootloader, or add new features to NostaluxOS!
+
+## What's next?
+
+Here are the immediate improvements on the roadmap:
+
+1. **Honor real framebuffer data** – the loader already passes width/height information through `BootInfo`. Teaching the
+   terminal (or a new graphics module) to read those fields will prepare the project for higher-resolution text or graphical
+   modes.
+2. **Richer keyboard handling** – the current line editor only understands printable characters and backspace. Tracking Shift/
+   Caps Lock and adding minimal cursor movement will make the shell far more pleasant.
+3. **New shell utilities** – lightweight commands such as `uptime`, `meminfo`, or a timer-based animation demo would give the
+   prompt more personality while still fitting the retro vibe.
+
+Contributions in any of these areas are welcome, whether it is code, documentation, or ideas.
 
 ## Resolving GitHub merge conflicts
 

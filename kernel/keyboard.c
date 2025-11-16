@@ -1,13 +1,8 @@
 #include <stdint.h>
 
+#include "io.h"
 #include "keyboard.h"
 #include "terminal.h"
-
-static inline uint8_t inb(uint16_t port) {
-    uint8_t value;
-    __asm__ volatile ("inb %1, %0" : "=a"(value) : "dN"(port));
-    return value;
-}
 
 static const char scancode_set1[128] = {
     0, 27, '1', '2', '3', '4', '5', '6', '7', '8', '9', '0', '-', '=', '\b',
