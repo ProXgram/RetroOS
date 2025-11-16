@@ -17,9 +17,25 @@ struct BootInfo {
     uint64_t framebuffer;
 };
 
-void kmain(const struct BootInfo* boot_info) {
-    (void)boot_info;
+static struct BootInfo g_boot_info = {
+    .width = 80,
+    .height = 25,
+    .pitch = 0,
+    .bpp = 0,
+    .framebuffer = 0,
+};
 
-    terminal_initialize();
+static void cache_boot_info(const struct BootInfo* boot_info) {
+    if (boot_info == NULL) {
+        return;
+    }
+
+    g_boot_info = *boot_info;
+}
+
+void kmain(const struct BootInfo* boot_info) {
+    cache_boot_info(boot_info);
+
+    terminal_initialize(g_boot_info.width, g_boot_info.height);
     shell_run();
 }
