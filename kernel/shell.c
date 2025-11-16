@@ -27,6 +27,10 @@ static void command_color(const char* args);
 static void command_echo(const char* args);
 static void command_ls(const char* args);
 static void command_cat(const char* args);
+static void command_touch(const char* args);
+static void command_write(const char* args);
+static void command_append(const char* args);
+static void command_rm(const char* args);
 static void command_sysinfo(const char* args);
 static void command_logs(const char* args);
 
@@ -42,6 +46,10 @@ static const struct shell_command COMMANDS[] = {
     {"color", command_color, "Update text colors (0-15)"},
     {"ls", command_ls, "List files in the virtual FS"},
     {"cat", command_cat, "Print a file from the virtual FS"},
+    {"touch", command_touch, "Create an empty file"},
+    {"write", command_write, "Overwrite a file with new text"},
+    {"append", command_append, "Append text to a file"},
+    {"rm", command_rm, "Remove a file"},
     {"history", command_history, "Show recent commands"},
     {"palette", command_palette, "Display VGA color codes"},
     {"sysinfo", command_sysinfo, "Display hardware and memory info"},
