@@ -26,4 +26,9 @@ SECTIONS
         *(.bss*)
         __bss_end = .;
     }
+
+    __kernel_end = .;
 }
+
+ASSERT(__kernel_end <= 0x001F0000,
+       "Kernel image exceeds safe limit and would collide with the long mode stack");
