@@ -433,6 +433,12 @@ static void shell_loop(void) {
         execute_command(input);
         history_record(input);
     }
+#include "shell.h"
+#include "terminal.h"
+
+void kmain(void) {
+    terminal_initialize();
+    shell_run();
 }
 
 void kmain(void) {

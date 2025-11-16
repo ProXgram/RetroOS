@@ -4,7 +4,7 @@ CC         ?= gcc
 LD         ?= ld
 OBJCOPY    ?= objcopy
 
-CFLAGS := -std=gnu11 -O2 -ffreestanding -fno-stack-protector -fno-pic -mno-red-zone -nostdlib -nostartfiles -Wall -Wextra
+CFLAGS := -std=gnu11 -O2 -ffreestanding -fno-stack-protector -fcf-protection=none -fno-pic -mno-red-zone -nostdlib -nostartfiles -Wall -Wextra -Ikernel/include
 NASMFLAGS := -Wall -Werror
 
 BUILD_DIR := build
@@ -14,6 +14,8 @@ KERNEL_ELF := $(BUILD_DIR)/kernel.elf
 KERNEL_BIN := $(BUILD_DIR)/kernel.bin
 PAYLOAD_BIN := $(BUILD_DIR)/stage2_kernel.bin
 OS_IMAGE := $(BUILD_DIR)/RetroOS.img
+KERNEL_SRCS := $(wildcard kernel/*.c)
+KERNEL_OBJS := $(patsubst kernel/%.c,$(BUILD_DIR)/%.o,$(KERNEL_SRCS))
 
 .PHONY: all clean run
 
@@ -22,10 +24,12 @@ all: $(OS_IMAGE)
 $(BUILD_DIR):
 	@mkdir -p $(BUILD_DIR)
 
-$(KERNEL_ELF): kernel/entry.asm kernel/kernel.c kernel/linker.ld | $(BUILD_DIR)
+$(KERNEL_ELF): kernel/entry.asm $(KERNEL_OBJS) kernel/linker.ld | $(BUILD_DIR)
 	$(NASM) -f elf64 kernel/entry.asm -o $(BUILD_DIR)/entry.o
-	$(CC) $(CFLAGS) -c kernel/kernel.c -o $(BUILD_DIR)/kernel.o
-	$(LD) -nostdlib -z max-page-size=0x1000 -T kernel/linker.ld -o $@ $(BUILD_DIR)/entry.o $(BUILD_DIR)/kernel.o
+	$(LD) -nostdlib -z max-page-size=0x1000 -T kernel/linker.ld -o $@ $(BUILD_DIR)/entry.o $(KERNEL_OBJS)
+
+$(BUILD_DIR)/%.o: kernel/%.c | $(BUILD_DIR)
+	$(CC) $(CFLAGS) -c $< -o $@
 
 $(KERNEL_BIN): $(KERNEL_ELF) | $(BUILD_DIR)
 	$(OBJCOPY) -O binary $(KERNEL_ELF) $@
