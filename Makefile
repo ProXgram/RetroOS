@@ -4,6 +4,9 @@ CC         ?= gcc
 LD         ?= ld
 OBJCOPY    ?= objcopy
 
+CONFLICT_CHECK := ./scripts/check-conflicts.sh
+
+CFLAGS := -std=gnu11 -O2 -ffreestanding -fno-stack-protector -fcf-protection=none -fno-pic -mno-red-zone -nostdlib -nostartfiles -Wall -Wextra -Ikernel/include -mno-mmx -mno-sse -mno-sse2 -mno-sse3 -mno-ssse3 -mno-sse4 -mno-avx
 CFLAGS := -std=gnu11 -O2 -ffreestanding -fno-stack-protector -fno-pic -mno-red-zone -mgeneral-regs-only -nostdlib -nostartfiles -Wall -Wextra
 CFLAGS := -std=gnu11 -O2 -ffreestanding -fno-stack-protector -fcf-protection=none -fno-pic -mno-red-zone -nostdlib -nostartfiles -Wall -Wextra -Ikernel/include -mno-mmx -mno-sse -mno-sse2 -mno-sse3 -mno-ssse3 -mno-sse4 -mno-avx
 CFLAGS := -std=gnu11 -O2 -ffreestanding -fno-stack-protector -fcf-protection=none -fno-pic -mno-red-zone -nostdlib -nostartfiles -Wall -Wextra -Ikernel/include
@@ -20,6 +23,9 @@ KERNEL_SRCS := $(wildcard kernel/*.c)
 KERNEL_OBJS := $(patsubst kernel/%.c,$(BUILD_DIR)/%.o,$(KERNEL_SRCS))
 
 .PHONY: all clean run check-conflicts
+
+all: check-conflicts $(OS_IMAGE)
+
 
 all: check-conflicts $(OS_IMAGE)
 

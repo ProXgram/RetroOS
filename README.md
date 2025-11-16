@@ -76,3 +76,35 @@ If GitHub reports conflicts when you open a pull request, bring your branch up t
 4. Run `make` to ensure the combined changes still build, then force-push the updated branch to GitHub if you rebased (`git push --force-with-lease`).
 
 GitHub will automatically re-run its checks once your branch no longer has conflicts.
+
+> **Tip:** The build now runs `scripts/check-conflicts.sh` automatically before compiling. If `make` fails with a message about
+> conflict markers, revisit the files listed in the error, remove the `<<<<<<<`, `=======`, and `>>>>>>>` lines, and then retry
+> the build.
+
+### When the build still fails after pulling
+
+Occasionally `git pull` succeeds but leaves behind an unintended mash-up of old and new sources (for example, you might see
+compiler errors such as `VGA_MEMORY undeclared`, `invalid storage class for function`, or multiple `kmain` definitions even
+though the merge supposedly completed). When that happens, double-check that your working tree actually matches the latest
+`main` branch instead of a partially stitched-together file:
+
+1. Inspect your working tree and look for unexpected local edits:
+   ```sh
+   git status -sb
+   ```
+   Any files listed here were either modified locally or still conflicted. If you intended to keep none of those changes,
+   restore them from the upstream branch:
+   ```sh
+   git restore --source origin/main -- path/to/file
+   ```
+2. If many files are affected (or you are unsure which one introduced the corruption), reset everything back to the remote
+   branch and rebuild:
+   ```sh
+   git fetch origin
+   git reset --hard origin/main
+   git clean -fd   # drops untracked files/directories such as old build artifacts
+   make
+   ```
+
+These steps return the repository to the exact contents of `origin/main`, ensuring that a clean `make` run reflects the code
+under review on GitHub rather than a stale or partially merged snapshot.
