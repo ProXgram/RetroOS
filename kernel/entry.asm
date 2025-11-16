@@ -5,6 +5,7 @@ section .text
     extern kmain
     extern gdt_init
     extern interrupts_init
+    extern paging_init
     extern __bss_start
     extern __bss_end
 
@@ -18,6 +19,7 @@ _start:
     xor rax, rax
     rep stosb
 
+    call paging_init
     call gdt_init
     call interrupts_init
 
