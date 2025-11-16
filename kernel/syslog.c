@@ -1,0 +1,58 @@
+#include "syslog.h"
+
+#include <stddef.h>
+
+#define SYSLOG_CAPACITY 64
+#define SYSLOG_MESSAGE_LEN 80
+
+static char g_entries[SYSLOG_CAPACITY][SYSLOG_MESSAGE_LEN];
+static size_t g_start = 0;
+static size_t g_count = 0;
+
+static void copy_message(char* dest, const char* src) {
+    size_t i = 0;
+    if (dest == NULL || src == NULL) {
+        return;
+    }
+    for (; i < SYSLOG_MESSAGE_LEN - 1 && src[i] != '\0'; i++) {
+        dest[i] = src[i];
+    }
+    dest[i] = '\0';
+}
+
+void syslog_init(void) {
+    g_start = 0;
+    g_count = 0;
+    for (size_t i = 0; i < SYSLOG_CAPACITY; i++) {
+        g_entries[i][0] = '\0';
+    }
+}
+
+void syslog_write(const char* message) {
+    if (message == NULL) {
+        return;
+    }
+
+    size_t index;
+    if (g_count < SYSLOG_CAPACITY) {
+        index = (g_start + g_count) % SYSLOG_CAPACITY;
+        g_count++;
+    } else {
+        index = g_start;
+        g_start = (g_start + 1) % SYSLOG_CAPACITY;
+    }
+
+    copy_message(g_entries[index], message);
+}
+
+size_t syslog_length(void) {
+    return g_count;
+}
+
+const char* syslog_entry(size_t index) {
+    if (index >= g_count) {
+        return NULL;
+    }
+    size_t actual = (g_start + index) % SYSLOG_CAPACITY;
+    return g_entries[actual];
+}

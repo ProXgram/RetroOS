@@ -19,14 +19,6 @@ enum terminal_mode {
 
 static enum terminal_mode current_mode = TERMINAL_MODE_VGA_TEXT;
 
-static inline void outb(uint16_t port, uint8_t value) {
-    __asm__ volatile ("outb %0, %1" : : "a"(value), "Nd"(port));
-}
-
-static inline void outb(uint16_t port, uint8_t value) {
-    __asm__ volatile ("outb %0, %1" : : "a"(value), "Nd"(port));
-}
-
 static inline uint16_t vga_entry(char c, uint8_t color) {
     return (uint16_t)c | ((uint16_t)color << 8);
 }
@@ -134,6 +126,15 @@ void terminal_clear(void) {
 
 void terminal_setcolors(uint8_t fg, uint8_t bg) {
     terminal_color = make_color(fg, bg);
+}
+
+void terminal_getcolors(uint8_t* fg, uint8_t* bg) {
+    if (fg != NULL) {
+        *fg = (uint8_t)(terminal_color & 0x0F);
+    }
+    if (bg != NULL) {
+        *bg = (uint8_t)((terminal_color >> 4) & 0x0F);
+    }
 }
 
 static void terminal_setcell(size_t x, size_t y, char c) {
