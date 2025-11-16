@@ -76,7 +76,3 @@ If GitHub reports conflicts when you open a pull request, bring your branch up t
 4. Run `make` to ensure the combined changes still build, then force-push the updated branch to GitHub if you rebased (`git push --force-with-lease`).
 
 GitHub will automatically re-run its checks once your branch no longer has conflicts.
-
-> **Tip:** The build now runs `scripts/check-conflicts.sh` automatically before compiling. If `make` fails with a message about
-> conflict markers, revisit the files listed in the error, remove the `<<<<<<<`, `=======`, and `>>>>>>>` lines, and then retry
-> the build.
