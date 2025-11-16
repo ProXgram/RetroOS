@@ -412,6 +412,7 @@ static void command_palette(const char* args) {
     uint8_t original_bg = 0;
     terminal_getcolors(&original_fg, &original_bg);
 
+    terminal_begin_batch();
     terminal_writestring("VGA palette codes:\n");
     for (unsigned int i = 0; i < 16; i++) {
         terminal_writestring("  ");
@@ -430,6 +431,8 @@ static void command_palette(const char* args) {
 
         terminal_newline();
     }
+    terminal_setcolors(original_fg, original_bg);
+    terminal_end_batch();
 }
 
 static void command_echo(const char* args) {

@@ -44,6 +44,7 @@ void background_render(void) {
     uint8_t original_bg = 0;
     terminal_getcolors(&original_fg, &original_bg);
 
+    terminal_begin_batch();
     terminal_setcolors(0x0F, 0x01);
     terminal_clear();
 
@@ -51,6 +52,7 @@ void background_render(void) {
     draw_grid_panel();
 
     terminal_setcolors(original_fg, original_bg);
+    terminal_end_batch();
 
     syslog_write("UI: background refreshed");
 }

@@ -8,6 +8,8 @@ void terminal_initialize(uint32_t width, uint32_t height);
 void terminal_clear(void);
 void terminal_setcolors(uint8_t fg, uint8_t bg);
 void terminal_getcolors(uint8_t* fg, uint8_t* bg);
+void terminal_begin_batch(void);
+void terminal_end_batch(void);
 void terminal_write_char(char c);
 void terminal_write(const char* data, size_t length);
 void terminal_writestring(const char* data);
