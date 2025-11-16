@@ -18,19 +18,6 @@ structure, and user interaction.
 
 More functionality will follow over time, but these pieces make NostaluxOS fun to poke at immediately after boot.
 
-## What NostaluxOS does today
-
-1. **Boot flow and hand-off** – the handcrafted boot sector loads `stage2`, copies the 64-bit kernel into memory, flips the CPU
-   into long mode, and jumps to the kernel entry point.
-2. **Text terminal** – once inside the kernel we clear the VGA text buffer, set up the hardware cursor, and accept character
-   writes from anywhere in the kernel. Cursor updates keep the caret in sync with whatever the terminal prints.
-3. **Shell interaction** – `kmain` immediately launches the mini shell where you can run:
-   - `help`, `about`, `clear`, `color <fg> <bg>`
-   - `echo <text>`, `history`, and `palette` for quick experimentation
-   The shell keeps the last few commands in memory and shows them via `history`, so you can quickly recall what you typed.
-
-This is intentionally a tiny playground, but it already exercises the boot pipeline, keyboard input, and VGA output end to end.
-
 ## Getting started
 
 The repository contains a handcrafted bootloader and a tiny 64-bit kernel. The bootloader loads the kernel into memory,
@@ -79,20 +66,6 @@ This removes all files under the `build/` directory.
 - `Makefile` — build orchestration that assembles the boot stages, compiles the kernel, and produces a bootable image.
 
 Feel free to hack on the kernel, expand the bootloader, or add new features to NostaluxOS!
-
-## What's next?
-
-Here are the immediate improvements on the roadmap:
-
-1. **Honor real framebuffer data** – the loader already passes width/height information through `BootInfo`. Teaching the
-   terminal (or a new graphics module) to read those fields will prepare the project for higher-resolution text or graphical
-   modes.
-2. **Richer keyboard handling** – the current line editor only understands printable characters and backspace. Tracking Shift/
-   Caps Lock and adding minimal cursor movement will make the shell far more pleasant.
-3. **New shell utilities** – lightweight commands such as `uptime`, `meminfo`, or a timer-based animation demo would give the
-   prompt more personality while still fitting the retro vibe.
-
-Contributions in any of these areas are welcome, whether it is code, documentation, or ideas.
 
 ## Resolving GitHub merge conflicts
 
