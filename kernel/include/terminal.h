@@ -12,5 +12,7 @@ void terminal_write(const char* data, size_t length);
 void terminal_writestring(const char* data);
 void terminal_write_uint(unsigned int value);
 void terminal_newline(void);
+void terminal_move_cursor_left(size_t count);
+void terminal_move_cursor_right(size_t count);
 
 #endif /* TERMINAL_H */
