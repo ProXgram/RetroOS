@@ -17,17 +17,62 @@ start:
     mov [boot_drive], dl
 
     mov si, disk_address_packet
-    mov word [si + 2], TOTAL_SECTORS
     mov word [si + 4], stage2_offset
     mov word [si + 6], 0x0000
     mov dword [si + 8], 1
     mov dword [si + 12], 0
 
+    mov cx, TOTAL_SECTORS
+
+    ; INT 13h extensions only guarantee up to 127 sectors per transfer.
+    ; Load the payload in manageable chunks so larger kernels boot reliably.
+
+.load_loop:
+    cmp cx, 0
+    je .load_done
+
+    mov ax, cx
+    cmp ax, 127
+    jbe .chunk_ready
+    mov ax, 127
+.chunk_ready:
+    mov si, disk_address_packet
+    mov word [si + 2], ax
+    push cx
+    push ax
+
     mov dl, [boot_drive]
     mov ah, 0x42
+    mov si, disk_address_packet
     int 0x13
     jc disk_error
 
+    pop ax
+    pop cx
+    sub cx, ax
+
+    mov si, disk_address_packet
+    mov bx, ax
+    shl bx, 9
+    add word [si + 4], bx
+    adc word [si + 6], 0
+
+    mov bx, [si + 8]
+    add bx, ax
+    mov [si + 8], bx
+    mov bx, [si + 10]
+    adc bx, 0
+    mov [si + 10], bx
+    mov bx, [si + 12]
+    adc bx, 0
+    mov [si + 12], bx
+    mov bx, [si + 14]
+    adc bx, 0
+    mov [si + 14], bx
+
+    jmp .load_loop
+
+.load_done:
     jmp 0x0000:stage2_offset
 
 disk_error:
