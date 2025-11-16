@@ -50,6 +50,8 @@ make run
 
 The QEMU window will display the boot banner and drop you into the tiny MemoriaOS shell. Type `help` to see the available
 commands (such as `about`, `clear`, `color`, `history`, `palette`, or `echo`).
+The QEMU window will display the boot banner and drop you into the tiny RetroOS shell. Type `help` to see the available
+commands (such as `about`, `clear`, `color`, or `echo`).
 
 ### Cleaning
 
