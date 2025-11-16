@@ -153,6 +153,149 @@ static void command_history(const char* args) {
     }
 }
 
+static void command_ls(const char* args) {
+    (void)args;
+
+    size_t count = fs_entry_count();
+    if (count == 0) {
+        terminal_writestring("No files are available.\n");
+        return;
+    }
+
+    terminal_writestring("Virtual filesystem:\n");
+    for (size_t i = 0; i < count; i++) {
+        const struct fs_entry* entry = fs_entry_at(i);
+        if (entry == NULL) {
+            continue;
+        }
+        terminal_writestring("  ");
+        terminal_writestring(entry->name);
+        terminal_writestring(" - ");
+        terminal_writestring(entry->description);
+        terminal_newline();
+    }
+}
+
+static void copy_trimmed_token(char* dest, size_t dest_size, const char* src) {
+    if (dest_size == 0) {
+        return;
+    }
+
+    size_t length = kstrlen(src);
+    while (length > 0 && (src[length - 1] == ' ' || src[length - 1] == '\t')) {
+        length--;
+    }
+
+    if (length >= dest_size) {
+        length = dest_size - 1;
+    }
+
+    for (size_t i = 0; i < length; i++) {
+        dest[i] = src[i];
+    }
+    dest[length] = '\0';
+}
+
+static void command_cat(const char* args) {
+    const char* filename_start = kskip_spaces(args);
+    if (*filename_start == '\0') {
+        terminal_writestring("Usage: cat <filename>\n");
+        return;
+    }
+
+    char filename[48];
+    copy_trimmed_token(filename, sizeof(filename), filename_start);
+
+    if (filename[0] == '\0') {
+        terminal_writestring("Usage: cat <filename>\n");
+        return;
+    }
+
+    const struct fs_entry* entry = fs_find(filename);
+    if (entry == NULL) {
+        terminal_writestring("File not found.\n");
+        return;
+    }
+
+    terminal_writestring(entry->contents);
+}
+
+static void command_sysinfo(const char* args) {
+    (void)args;
+
+    const struct BootInfo* boot = system_boot_info();
+    const struct system_profile* profile = system_profile_info();
+
+    terminal_writestring("Display: ");
+    terminal_write_uint(boot->width);
+    terminal_writestring("x");
+    terminal_write_uint(boot->height);
+    terminal_writestring(" pixels, pitch=");
+    terminal_write_uint(boot->pitch);
+    terminal_writestring(" bytes\n");
+
+    terminal_writestring("Framebuffer @ 0x");
+    // Print framebuffer address in hex (16 digits)
+    for (int shift = 60; shift >= 0; shift -= 4) {
+        uint8_t nibble = (uint8_t)((boot->framebuffer >> shift) & 0xF);
+        char c = (nibble < 10) ? (char)('0' + nibble) : (char)('A' + (nibble - 10));
+        terminal_write_char(c);
+    }
+    terminal_newline();
+
+    terminal_writestring("Memory: ");
+    terminal_write_uint(profile->memory_used_kb);
+    terminal_writestring(" KiB used / ");
+    terminal_write_uint(profile->memory_total_kb);
+    terminal_writestring(" KiB total\n");
+
+    terminal_writestring("Architecture: ");
+    terminal_writestring(profile->architecture);
+    terminal_newline();
+}
+
+static void command_logs(const char* args) {
+    (void)args;
+
+    size_t count = syslog_length();
+    if (count == 0) {
+        terminal_writestring("No log entries recorded yet.\n");
+        return;
+    }
+
+    terminal_writestring("Recent system logs:\n");
+    for (size_t i = 0; i < count; i++) {
+        const char* entry = syslog_entry(i);
+        if (entry == NULL) {
+            continue;
+        }
+        terminal_writestring("  ");
+        terminal_writestring(entry);
+        terminal_newline();
+    }
+}
+
+static void log_command_invocation(const char* command_name) {
+    static const char prefix[] = "Command: ";
+    char buffer[80];
+    size_t index = 0;
+
+    for (size_t i = 0; prefix[i] != '\0' && index + 1 < sizeof(buffer); i++) {
+        buffer[index++] = prefix[i];
+    }
+
+    if (command_name == NULL) {
+        command_name = "<null>";
+    }
+
+    for (size_t i = 0; command_name[i] != '\0' && index + 1 < sizeof(buffer); i++) {
+        buffer[index++] = command_name[i];
+    }
+
+    buffer[index] = '\0';
+    syslog_write(buffer);
+}
+
 static const char* COLOR_NAMES[16] = {
     "Black", "Blue", "Green", "Cyan", "Red", "Magenta", "Brown", "Light Grey",
     "Dark Grey", "Light Blue", "Light Green", "Light Cyan", "Light Red",
