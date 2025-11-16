@@ -2,6 +2,7 @@
 #include <stddef.h>
 #include <stdint.h>
 
+#include "io.h"
 #include "keyboard.h"
 #include "kstring.h"
 #include "terminal.h"
