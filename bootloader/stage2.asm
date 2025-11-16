@@ -26,14 +26,14 @@ stage2_start:
     mov ss, ax
     mov sp, 0x7E00
 
-    mov ax, 0x0013
+    mov ax, 0x0003
     int 0x10
 
-    mov dword [BOOT_INFO + 0], 320
-    mov dword [BOOT_INFO + 4], 200
-    mov dword [BOOT_INFO + 8], 320
-    mov dword [BOOT_INFO + 12], 8
-    mov dword [BOOT_INFO + 16], 0x000A0000
+    mov dword [BOOT_INFO + 0], 80
+    mov dword [BOOT_INFO + 4], 25
+    mov dword [BOOT_INFO + 8], 160
+    mov dword [BOOT_INFO + 12], 16
+    mov dword [BOOT_INFO + 16], 0x000B8000
     mov dword [BOOT_INFO + 20], 0
 
     call enable_a20
