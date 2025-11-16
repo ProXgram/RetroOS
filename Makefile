@@ -18,7 +18,7 @@ STAGE2_BIN := $(BUILD_DIR)/stage2.bin
 KERNEL_ELF := $(BUILD_DIR)/kernel.elf
 KERNEL_BIN := $(BUILD_DIR)/kernel.bin
 PAYLOAD_BIN := $(BUILD_DIR)/stage2_kernel.bin
-OS_IMAGE := $(BUILD_DIR)/MemoriaOS.img
+OS_IMAGE := $(BUILD_DIR)/NostaluxOS.img
 KERNEL_SRCS := $(wildcard kernel/*.c)
 KERNEL_OBJS := $(patsubst kernel/%.c,$(BUILD_DIR)/%.o,$(KERNEL_SRCS))
 

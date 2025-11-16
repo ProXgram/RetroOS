@@ -24,7 +24,7 @@ static void command_palette(const char* args);
 
 static const struct shell_command COMMANDS[] = {
     {"help", command_help, "Show this help message"},
-    {"about", command_about, "Learn more about MemoriaOS"},
+    {"about", command_about, "Learn more about NostaluxOS"},
     {"clear", command_clear, "Clear the screen"},
     {"color", command_color, "Update text colors (0-15)"},
     {"history", command_history, "Show recent commands"},
@@ -33,13 +33,15 @@ static const struct shell_command COMMANDS[] = {
 };
 #define COMMAND_COUNT (sizeof(COMMANDS) / sizeof(COMMANDS[0]))
 
-enum {
-    INPUT_CAPACITY = KEYBOARD_MAX_LINE,
-};
+#define INPUT_CAPACITY 128
+#define HISTORY_LIMIT 16
+
+static char COMMAND_HISTORY[HISTORY_LIMIT][INPUT_CAPACITY];
+static size_t history_count;
 
 static void shell_print_banner(void) {
-    terminal_writestring("MemoriaOS 64-bit demo kernel\n");
-    terminal_writestring("Welcome to the MemoriaOS console!\n");
+    terminal_writestring("NostaluxOS 64-bit demo kernel\n");
+    terminal_writestring("Welcome to the NostaluxOS console!\n");
     terminal_writestring("Type 'help' to list available commands.\n");
 }
 
@@ -57,7 +59,7 @@ static void command_help(const char* args) {
 
 static void command_about(const char* args) {
     (void)args;
-    terminal_writestring("MemoriaOS is a hobby 64-bit operating system kernel.\n");
+    terminal_writestring("NostaluxOS is a hobby 64-bit operating system kernel.\n");
     terminal_writestring("It focuses on simplicity and a retro-inspired feel.\n");
     terminal_writestring("Right now it ships with a text console shell and a handful of utilities.\n");
 }
@@ -143,6 +145,25 @@ static void command_echo(const char* args) {
     terminal_newline();
 }
 
+static void history_record(const char* input) {
+    size_t trimmed_length = kstrlen(input);
+    if (trimmed_length == 0) {
+        return;
+    }
+
+    size_t slot = history_count % HISTORY_LIMIT;
+    size_t copy_length = trimmed_length;
+    if (copy_length >= INPUT_CAPACITY) {
+        copy_length = INPUT_CAPACITY - 1;
+    }
+
+    for (size_t i = 0; i < copy_length; i++) {
+        COMMAND_HISTORY[slot][i] = input[i];
+    }
+    COMMAND_HISTORY[slot][copy_length] = '\0';
+    history_count++;
+}
+
 static void execute_command(const char* input) {
     const char* trimmed = kskip_spaces(input);
     if (*trimmed == '\0') {
@@ -175,7 +196,7 @@ void shell_run(void) {
     shell_print_banner();
 
     for (;;) {
-        terminal_writestring("\nmemoria> ");
+        terminal_writestring("\nostalux> ");
         keyboard_read_line(input, sizeof(input));
         execute_command(input);
     }
