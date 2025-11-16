@@ -1,4 +1,5 @@
 #include "terminal.h"
+#include <stdbool.h>
 #include "io.h"
 
 #define VGA_WIDTH 80
@@ -107,6 +108,7 @@ static void configure_geometry(uint32_t width, uint32_t height) {
 }
 
 void terminal_initialize(uint32_t width, uint32_t height) {
+    terminal_batch_depth = 0;
     terminal_row = 0;
     terminal_column = 0;
     terminal_color = make_color(0x0F, 0x00);
@@ -119,28 +121,21 @@ void terminal_initialize(uint32_t width, uint32_t height) {
         /* Placeholder for a future framebuffer-backed terminal path. */
     }
 
-    for (size_t y = 0; y < terminal_height; y++) {
-        for (size_t x = 0; x < terminal_width; x++) {
-            const size_t index = y * VGA_WIDTH + x;
-            terminal_buffer[index] = vga_entry(' ', terminal_color);
-        }
-    }
-
-    terminal_update_cursor();
+    terminal_clear();
 }
 
 void terminal_clear(void) {
     terminal_row = 0;
     terminal_column = 0;
 
+    terminal_begin_batch();
     for (size_t y = 0; y < terminal_height; y++) {
         for (size_t x = 0; x < terminal_width; x++) {
             const size_t index = y * VGA_WIDTH + x;
             terminal_buffer[index] = vga_entry(' ', terminal_color);
         }
     }
-
-    terminal_update_cursor();
+    terminal_end_batch();
 }
 
 void terminal_setcolors(uint8_t fg, uint8_t bg) {
@@ -203,23 +198,37 @@ void terminal_write_char(char c) {
 }
 
 void terminal_write(const char* data, size_t length) {
+    if (length == 0 || data == NULL) {
+        return;
+    }
+
+    terminal_begin_batch();
     for (size_t i = 0; i < length; i++) {
         terminal_write_char(data[i]);
     }
+    terminal_end_batch();
 }
 
 void terminal_writestring(const char* data) {
+    if (data == NULL) {
+        return;
+    }
+
+    terminal_begin_batch();
     for (size_t i = 0; data[i] != '\0'; i++) {
         terminal_write_char(data[i]);
     }
+    terminal_end_batch();
 }
 
 void terminal_write_uint(unsigned int value) {
+    terminal_begin_batch();
     char buffer[12];
     size_t index = 0;
 
     if (value == 0) {
         terminal_write_char('0');
+        terminal_end_batch();
         return;
     }
 
@@ -231,6 +240,8 @@ void terminal_write_uint(unsigned int value) {
     while (index > 0) {
         terminal_write_char(buffer[--index]);
     }
+
+    terminal_end_batch();
 }
 
 void terminal_newline(void) {
@@ -238,24 +249,31 @@ void terminal_newline(void) {
 }
 
 void terminal_move_cursor_left(size_t count) {
+    bool moved = false;
     while (count > 0) {
         if (terminal_column > 0) {
             terminal_column--;
+            moved = true;
         } else if (terminal_row > 0) {
             terminal_row--;
             terminal_column = terminal_width - 1;
+            moved = true;
         } else {
             break;
         }
         count--;
     }
-    terminal_update_cursor();
+    if (moved) {
+        terminal_update_cursor();
+    }
 }
 
 void terminal_move_cursor_right(size_t count) {
+    bool moved = false;
     while (count > 0) {
         if (terminal_column + 1 < terminal_width) {
             terminal_column++;
+            moved = true;
         } else {
             if (terminal_row + 1 >= terminal_height) {
                 terminal_column = terminal_width - 1;
@@ -263,8 +281,11 @@ void terminal_move_cursor_right(size_t count) {
             }
             terminal_column = 0;
             terminal_row++;
+            moved = true;
         }
         count--;
     }
-    terminal_update_cursor();
+    if (moved) {
+        terminal_update_cursor();
+    }
 }
