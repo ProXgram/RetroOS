@@ -29,7 +29,9 @@ stage2_start:
     lgdt [gdt_descriptor]
 
     mov eax, cr0
-    or eax, 0x1
+    or eax, 0x1               ; enable protected mode
+    and eax, ~(1 << 2)        ; clear EM to allow FPU/SSE instructions
+    or eax, (1 << 1)          ; ensure MP is set for proper FPU error reporting
     mov cr0, eax
     jmp CODE32_SEG:protected_mode_entry
 
@@ -86,7 +88,7 @@ protected_mode_entry:
     mov cr3, eax
 
     mov eax, cr4
-    or eax, (1 << 5)
+    or eax, (1 << 5) | (1 << 9) | (1 << 10) ; enable PAE and SSE support
     mov cr4, eax
 
     mov ecx, 0xC0000080
