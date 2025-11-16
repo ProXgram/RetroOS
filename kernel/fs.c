@@ -6,6 +6,8 @@
 
 static struct fs_file FILES[FS_MAX_FILES];
 
+static void fs_self_test(void);
+
 static void fs_clear(struct fs_file* file) {
     if (file == NULL) {
         return;
@@ -104,6 +106,7 @@ void fs_init(void) {
         "Use the 'logs' command to view the in-memory event log.\n");
 
     syslog_write("FS: mounted retro volume");
+    fs_self_test();
 }
 
 size_t fs_file_count(void) {
@@ -157,10 +160,11 @@ bool fs_touch(const char* name) {
 }
 
 bool fs_write(const char* name, const char* contents) {
-    if (contents == NULL) {
+    if (name == NULL || contents == NULL) {
         return false;
     }
 
+    bool existed = fs_find_mutable(name) != NULL;
     if (!fs_touch(name)) {
         return false;
     }
@@ -172,6 +176,9 @@ bool fs_write(const char* name, const char* contents) {
 
     size_t length = kstrlen(contents);
     if (length >= FS_MAX_FILE_SIZE) {
+        if (!existed) {
+            fs_clear(file);
+        }
         return false;
     }
 
@@ -184,10 +191,11 @@ bool fs_write(const char* name, const char* contents) {
 }
 
 bool fs_append(const char* name, const char* contents) {
-    if (contents == NULL) {
+    if (name == NULL || contents == NULL) {
         return false;
     }
 
+    bool existed = fs_find_mutable(name) != NULL;
     if (!fs_touch(name)) {
         return false;
     }
@@ -199,6 +207,9 @@ bool fs_append(const char* name, const char* contents) {
 
     size_t length = kstrlen(contents);
     if (file->size + length >= FS_MAX_FILE_SIZE) {
+        if (!existed) {
+            fs_clear(file);
+        }
         return false;
     }
 
@@ -218,4 +229,68 @@ bool fs_remove(const char* name) {
 
     fs_clear(file);
     return true;
+}
+
+static void fs_self_test(void) {
+    const char* scratch = "__fs_self_test__";
+    const char* oversize = "__fs_oversize__";
+    bool ok = true;
+
+    fs_remove(scratch);
+    fs_remove(oversize);
+
+    size_t baseline = fs_file_count();
+    if (!fs_write(scratch, "abc")) {
+        ok = false;
+    }
+
+    const struct fs_file* file = fs_find(scratch);
+    if (file == NULL || file->size != 3 || kstrcmp(file->data, "abc") != 0) {
+        ok = false;
+    }
+
+    if (!fs_append(scratch, "123")) {
+        ok = false;
+    }
+
+    file = fs_find(scratch);
+    if (file == NULL || file->size != 6 || kstrcmp(file->data, "abc123") != 0) {
+        ok = false;
+    }
+
+    if (fs_file_count() != baseline + 1) {
+        ok = false;
+    }
+
+    if (!fs_remove(scratch)) {
+        ok = false;
+    }
+
+    if (fs_file_count() != baseline) {
+        ok = false;
+    }
+
+    if (fs_find(scratch) != NULL) {
+        ok = false;
+    }
+
+    if (fs_touch("bad name")) {
+        ok = false;
+    }
+
+    char big[FS_MAX_FILE_SIZE + 1];
+    for (size_t i = 0; i < FS_MAX_FILE_SIZE; i++) {
+        big[i] = 'x';
+    }
+    big[FS_MAX_FILE_SIZE] = '\0';
+
+    if (fs_write(oversize, big)) {
+        ok = false;
+    }
+
+    if (fs_find(oversize) != NULL) {
+        ok = false;
+    }
+
+    syslog_write(ok ? "FS: self-test passed" : "FS: self-test failed");
 }
