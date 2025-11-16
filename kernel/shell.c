@@ -97,21 +97,21 @@ static void command_color(const char* args) {
 static void command_history(const char* args) {
     (void)args;
 
-    if (history_count == 0) {
+    size_t count = keyboard_history_length();
+    if (count == 0) {
         terminal_writestring("No commands have been run yet.\n");
         return;
     }
 
-    size_t start = 0;
-    if (history_count > HISTORY_LIMIT) {
-        start = history_count - HISTORY_LIMIT;
-    }
-
     terminal_writestring("Recent commands:\n");
-    for (size_t i = start; i < history_count; i++) {
-        terminal_write_uint(i - start + 1);
+    for (size_t i = 0; i < count; i++) {
+        const char* entry = keyboard_history_entry(i);
+        if (entry == NULL) {
+            continue;
+        }
+        terminal_write_uint(i + 1);
         terminal_writestring(". ");
-        terminal_writestring(COMMAND_HISTORY[i % HISTORY_LIMIT]);
+        terminal_writestring(entry);
         terminal_newline();
     }
 }
@@ -170,7 +170,7 @@ static void execute_command(const char* input) {
         return;
     }
 
-    history_record(trimmed);
+    keyboard_history_record(trimmed);
 
     const char* cursor = trimmed;
     while (*cursor != '\0' && *cursor != ' ' && *cursor != '\t') {
@@ -196,7 +196,7 @@ void shell_run(void) {
     shell_print_banner();
 
     for (;;) {
-        terminal_writestring("\nnostalux> ");
+        terminal_writestring("\nostalux> ");
         keyboard_read_line(input, sizeof(input));
         execute_command(input);
     }
