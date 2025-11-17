@@ -106,6 +106,13 @@ static void tss_load(uint16_t selector) {
 }
 
 void gdt_init(void) {
+    g_gdt = (struct gdt_layout){0};
+    g_tss = (struct tss){0};
+
+    g_tss.io_map_base = (uint16_t)sizeof(g_tss);
+    g_tss.rsp[0] = (uint64_t)(g_kernel_stack + sizeof(g_kernel_stack));
+    g_tss.ist[0] = (uint64_t)(g_double_fault_stack + sizeof(g_double_fault_stack));
+
     gdt_set_entry(&g_gdt.null, 0, 0, 0, 0);
     gdt_set_entry(&g_gdt.code, 0, 0, 0x9A, 0x20); // 64-bit code
     gdt_set_entry(&g_gdt.data, 0, 0, 0x92, 0x00); // 64-bit data
