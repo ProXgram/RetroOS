@@ -30,6 +30,34 @@ struct idt_descriptor {
 
 static struct idt_entry g_idt[256];
 
+static void syslog_write_hex(const char* label, uint64_t value) {
+    char buffer[96];
+    size_t index = 0;
+    while (label[index] != '\0' && index < sizeof(buffer) - 1) {
+        buffer[index] = label[index];
+        index++;
+    }
+    if (index < sizeof(buffer) - 1) {
+        buffer[index++] = '0';
+    }
+    if (index < sizeof(buffer) - 1) {
+        buffer[index++] = 'x';
+    }
+    for (int shift = 60; shift >= 0 && index < sizeof(buffer) - 1; shift -= 4) {
+        uint8_t nibble = (uint8_t)((value >> shift) & 0xF);
+        buffer[index++] = (char)(nibble < 10 ? ('0' + nibble) : ('A' + (nibble - 10)));
+    }
+    buffer[index] = '\0';
+    syslog_write(buffer);
+}
+
+static void halt_on_invalid(const char* message) {
+    syslog_write(message);
+    for (;;) {
+        __asm__ volatile("cli; hlt");
+    }
+}
+
 static const char* const EXCEPTION_NAMES[] = {
     "Divide-by-zero",
     "Debug",
@@ -281,6 +309,19 @@ void interrupts_init(void) {
         .limit = (uint16_t)(sizeof(g_idt) - 1),
         .base = (uint64_t)g_idt,
     };
+
+    syslog_write_hex("IDT base: ", descriptor.base);
+    syslog_write_hex("IDT limit: ", descriptor.limit);
+    syslog_write_hex("Vector 8 selector: ", g_idt[8].selector);
+    syslog_write_hex("Vector 8 IST: ", g_idt[8].ist);
+
+    if (g_idt[8].selector != 0x08) {
+        halt_on_invalid("IDT vector 8 selector does not match kernel code segment; halting.");
+    }
+
+    if (g_idt[8].ist != 1) {
+        halt_on_invalid("IDT vector 8 IST index is not 1; halting.");
+    }
 
     __asm__ volatile("lidt %0" : : "m"(descriptor));
     syslog_write("Trace: interrupts_init complete");
