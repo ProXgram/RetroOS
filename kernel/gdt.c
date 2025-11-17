@@ -55,10 +55,6 @@ static struct tss g_tss __attribute__((aligned(16)));
 static uint8_t g_kernel_stack[KERNEL_STACK_SIZE] __attribute__((aligned(16)));
 static uint8_t g_double_fault_stack[DOUBLE_FAULT_STACK_SIZE] __attribute__((aligned(16)));
 
-static struct gdt_layout g_gdt;
-static struct tss g_tss;
-static uint8_t g_double_fault_stack[4096] __attribute__((aligned(16)));
-
 static void gdt_set_entry(struct gdt_entry64* entry, uint32_t base, uint32_t limit, uint8_t access,
                           uint8_t flags) {
     entry->limit_low = (uint16_t)(limit & 0xFFFF);
@@ -106,21 +102,9 @@ static void tss_load(uint16_t selector) {
 }
 
 void gdt_init(void) {
-    g_gdt.null = (struct gdt_entry64){0};
-    g_gdt.code = (struct gdt_entry64){0};
-    g_gdt.data = (struct gdt_entry64){0};
-    g_gdt.tss = (struct tss_descriptor){0};
+    g_gdt = (struct gdt_layout){0};
+    g_tss = (struct tss){0};
 
-    for (size_t i = 0; i < 3; i++) {
-        g_tss.rsp[i] = 0;
-    }
-    for (size_t i = 0; i < sizeof(g_tss.ist) / sizeof(g_tss.ist[0]); i++) {
-        g_tss.ist[i] = 0;
-    }
-    g_tss.reserved0 = 0;
-    g_tss.reserved1 = 0;
-    g_tss.reserved2 = 0;
-    g_tss.reserved3 = 0;
     g_tss.io_map_base = (uint16_t)sizeof(g_tss);
     g_tss.rsp[0] = (uint64_t)(g_kernel_stack + sizeof(g_kernel_stack));
     g_tss.ist[0] = (uint64_t)(g_double_fault_stack + sizeof(g_double_fault_stack));
