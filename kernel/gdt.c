@@ -50,10 +50,14 @@ enum {
     DOUBLE_FAULT_STACK_SIZE = 4096,
 };
 
-static struct gdt_layout g_gdt __attribute__((aligned(16)));
-static struct tss g_tss __attribute__((aligned(16)));
 static uint8_t g_kernel_stack[KERNEL_STACK_SIZE] __attribute__((aligned(16)));
 static uint8_t g_double_fault_stack[DOUBLE_FAULT_STACK_SIZE] __attribute__((aligned(16)));
+static struct tss g_tss __attribute__((aligned(16))) = {
+    .rsp = {[0] = (uint64_t)(g_kernel_stack + sizeof(g_kernel_stack))},
+    .ist = {[0] = (uint64_t)(g_double_fault_stack + sizeof(g_double_fault_stack))},
+    .io_map_base = sizeof(struct tss),
+};
+static struct gdt_layout g_gdt __attribute__((aligned(16)));
 
 static void gdt_set_entry(struct gdt_entry64* entry, uint32_t base, uint32_t limit, uint8_t access,
                           uint8_t flags) {
