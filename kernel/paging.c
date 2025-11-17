@@ -3,6 +3,7 @@
 #include <stdbool.h>
 #include <stddef.h>
 #include <stdint.h>
+#include "syslog.h"
 
 #define PAGE_PRESENT (1ull << 0)
 #define PAGE_RW      (1ull << 1)
@@ -89,6 +90,7 @@ static void enable_write_protect(void) {
 }
 
 void paging_init(void) {
+    syslog_write("Trace: entering paging_init");
     initialize_identity_map();
 
     set_range_writable((uint64_t)__text_start, (uint64_t)__text_end, false);
@@ -97,4 +99,5 @@ void paging_init(void) {
 
     load_new_tables();
     enable_write_protect();
+    syslog_write("Trace: paging_init complete");
 }

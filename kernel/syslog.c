@@ -1,6 +1,8 @@
 #include "syslog.h"
 
 #include <stddef.h>
+#include <stdint.h>
+#include "io.h"
 
 #define SYSLOG_CAPACITY 64
 #define SYSLOG_MESSAGE_LEN 80
@@ -32,6 +34,11 @@ void syslog_write(const char* message) {
     if (message == NULL) {
         return;
     }
+
+    for (const char* c = message; *c != '\0'; c++) {
+        outb(0xE9, (uint8_t)*c);
+    }
+    outb(0xE9, '\n');
 
     size_t index;
     if (g_count < SYSLOG_CAPACITY) {

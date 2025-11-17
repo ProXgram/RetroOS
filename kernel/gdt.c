@@ -2,6 +2,7 @@
 
 #include <stdint.h>
 #include <stddef.h>
+#include "syslog.h"
 
 struct gdt_entry64 {
     uint16_t limit_low;
@@ -106,6 +107,7 @@ static void tss_load(uint16_t selector) {
 }
 
 void gdt_init(void) {
+    syslog_write("Trace: entering gdt_init");
     g_gdt = (struct gdt_layout){0};
     g_tss = (struct tss){0};
 
@@ -125,4 +127,5 @@ void gdt_init(void) {
 
     gdt_load_descriptor(&descriptor);
     tss_load(0x18);
+    syslog_write("Trace: gdt_init complete");
 }
