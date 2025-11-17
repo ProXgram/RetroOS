@@ -3,7 +3,16 @@
 #include <stdint.h>
 #include <stddef.h>
 
-struct gdt_entry {
+struct gdt_entry64 {
+    uint16_t limit_low;
+    uint16_t base_low;
+    uint8_t base_mid;
+    uint8_t access;
+    uint8_t granularity;
+    uint8_t base_high;
+} __attribute__((packed));
+
+struct tss_descriptor {
     uint16_t limit_low;
     uint16_t base_low;
     uint8_t base_mid;
@@ -29,11 +38,19 @@ struct tss {
     uint16_t io_map_base;
 } __attribute__((packed));
 
-static struct gdt_entry g_gdt[5];
-static struct tss g_tss;
+struct gdt_layout {
+    struct gdt_entry64 null;
+    struct gdt_entry64 code;
+    struct gdt_entry64 data;
+    struct tss_descriptor tss;
+} __attribute__((packed));
+
+static struct gdt_layout g_gdt __attribute__((aligned(16)));
+static struct tss g_tss __attribute__((aligned(16)));
+static uint8_t g_kernel_stack[4096] __attribute__((aligned(16)));
 static uint8_t g_double_fault_stack[4096] __attribute__((aligned(16)));
 
-static void gdt_set_entry(struct gdt_entry* entry, uint32_t base, uint32_t limit, uint8_t access,
+static void gdt_set_entry(struct gdt_entry64* entry, uint32_t base, uint32_t limit, uint8_t access,
                           uint8_t flags) {
     entry->limit_low = (uint16_t)(limit & 0xFFFF);
     entry->base_low = (uint16_t)(base & 0xFFFF);
@@ -41,11 +58,9 @@ static void gdt_set_entry(struct gdt_entry* entry, uint32_t base, uint32_t limit
     entry->access = access;
     entry->granularity = (uint8_t)(((limit >> 16) & 0x0F) | (flags & 0xF0));
     entry->base_high = (uint8_t)((base >> 24) & 0xFF);
-    entry->base_upper = 0;
-    entry->reserved = 0;
 }
 
-static void gdt_set_tss_entry(struct gdt_entry* entry, uint64_t base, uint32_t limit) {
+static void gdt_set_tss_entry(struct tss_descriptor* entry, uint64_t base, uint32_t limit) {
     entry->limit_low = (uint16_t)(limit & 0xFFFF);
     entry->base_low = (uint16_t)(base & 0xFFFF);
     entry->base_mid = (uint8_t)((base >> 16) & 0xFF);
@@ -82,16 +97,10 @@ static void tss_load(uint16_t selector) {
 }
 
 void gdt_init(void) {
-    for (size_t i = 0; i < sizeof(g_gdt) / sizeof(g_gdt[0]); i++) {
-        g_gdt[i].limit_low = 0;
-        g_gdt[i].base_low = 0;
-        g_gdt[i].base_mid = 0;
-        g_gdt[i].access = 0;
-        g_gdt[i].granularity = 0;
-        g_gdt[i].base_high = 0;
-        g_gdt[i].base_upper = 0;
-        g_gdt[i].reserved = 0;
-    }
+    g_gdt.null = (struct gdt_entry64){0};
+    g_gdt.code = (struct gdt_entry64){0};
+    g_gdt.data = (struct gdt_entry64){0};
+    g_gdt.tss = (struct tss_descriptor){0};
 
     for (size_t i = 0; i < 3; i++) {
         g_tss.rsp[i] = 0;
@@ -104,16 +113,17 @@ void gdt_init(void) {
     g_tss.reserved2 = 0;
     g_tss.reserved3 = 0;
     g_tss.io_map_base = (uint16_t)sizeof(g_tss);
+    g_tss.rsp[0] = (uint64_t)(g_kernel_stack + sizeof(g_kernel_stack));
     g_tss.ist[0] = (uint64_t)(g_double_fault_stack + sizeof(g_double_fault_stack));
 
-    gdt_set_entry(&g_gdt[0], 0, 0, 0, 0);
-    gdt_set_entry(&g_gdt[1], 0, 0, 0x9A, 0x20); // 64-bit code
-    gdt_set_entry(&g_gdt[2], 0, 0, 0x92, 0x00); // 64-bit data
-    gdt_set_tss_entry(&g_gdt[3], (uint64_t)&g_tss, (uint32_t)sizeof(g_tss) - 1);
+    gdt_set_entry(&g_gdt.null, 0, 0, 0, 0);
+    gdt_set_entry(&g_gdt.code, 0, 0, 0x9A, 0x20); // 64-bit code
+    gdt_set_entry(&g_gdt.data, 0, 0, 0x92, 0x00); // 64-bit data
+    gdt_set_tss_entry(&g_gdt.tss, (uint64_t)&g_tss, (uint32_t)sizeof(g_tss) - 1);
 
     const struct gdt_descriptor descriptor = {
         .limit = (uint16_t)(sizeof(g_gdt) - 1),
-        .base = (uint64_t)&g_gdt[0],
+        .base = (uint64_t)&g_gdt,
     };
 
     gdt_load_descriptor(&descriptor);
