@@ -46,6 +46,11 @@ struct gdt_layout {
     struct tss_descriptor tss;
 } __attribute__((packed));
 
+_Static_assert(offsetof(struct gdt_layout, null) == 0x00, "Null selector must be at 0x00");
+_Static_assert(offsetof(struct gdt_layout, code) == 0x08, "Code selector must be 0x08");
+_Static_assert(offsetof(struct gdt_layout, data) == 0x10, "Data selector must be 0x10");
+_Static_assert(offsetof(struct gdt_layout, tss) == 0x18, "TSS selector must be 0x18");
+
 enum {
     KERNEL_STACK_SIZE = 8192,
     DOUBLE_FAULT_STACK_SIZE = 4096,
@@ -59,6 +64,34 @@ static struct tss g_tss __attribute__((aligned(16))) = {
     .io_map_base = sizeof(struct tss),
 };
 static struct gdt_layout g_gdt __attribute__((aligned(16)));
+
+static void syslog_write_hex(const char* label, uint64_t value) {
+    char buffer[96];
+    size_t index = 0;
+    while (label[index] != '\0' && index < sizeof(buffer) - 1) {
+        buffer[index] = label[index];
+        index++;
+    }
+    if (index < sizeof(buffer) - 1) {
+        buffer[index++] = '0';
+    }
+    if (index < sizeof(buffer) - 1) {
+        buffer[index++] = 'x';
+    }
+    for (int shift = 60; shift >= 0 && index < sizeof(buffer) - 1; shift -= 4) {
+        uint8_t nibble = (uint8_t)((value >> shift) & 0xF);
+        buffer[index++] = (char)(nibble < 10 ? ('0' + nibble) : ('A' + (nibble - 10)));
+    }
+    buffer[index] = '\0';
+    syslog_write(buffer);
+}
+
+static void halt_on_invalid(const char* message) {
+    syslog_write(message);
+    for (;;) {
+        __asm__ volatile("cli; hlt");
+    }
+}
 
 static void gdt_set_entry(struct gdt_entry64* entry, uint32_t base, uint32_t limit, uint8_t access,
                           uint8_t flags) {
@@ -124,6 +157,27 @@ void gdt_init(void) {
         .limit = (uint16_t)(sizeof(g_gdt) - 1),
         .base = (uint64_t)&g_gdt,
     };
+
+    syslog_write("Validating GDT selectors against bootloader (0x08/0x10/0x18)");
+    syslog_write_hex("GDT base: ", descriptor.base);
+    syslog_write_hex("GDT limit: ", descriptor.limit);
+    syslog_write_hex("Code descriptor access: ", g_gdt.code.access);
+    syslog_write_hex("Data descriptor access: ", g_gdt.data.access);
+    syslog_write_hex("TSS descriptor access: ", g_gdt.tss.access);
+    syslog_write_hex("TSS descriptor gran: ", g_gdt.tss.granularity);
+    syslog_write_hex("TSS.IST[0]: ", g_tss.ist[0]);
+
+    if ((g_gdt.code.access != 0x9A) || (g_gdt.data.access != 0x92)) {
+        halt_on_invalid("Invalid GDT access bytes; halting.");
+    }
+
+    if ((g_gdt.tss.access & 0x80) == 0) {
+        halt_on_invalid("TSS descriptor not marked present; halting.");
+    }
+
+    if (g_tss.ist[0] == 0) {
+        halt_on_invalid("TSS IST[0] is empty; halting.");
+    }
 
     gdt_load_descriptor(&descriptor);
     tss_load(0x18);
