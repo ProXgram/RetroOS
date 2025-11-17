@@ -45,6 +45,16 @@ struct gdt_layout {
     struct tss_descriptor tss;
 } __attribute__((packed));
 
+enum {
+    KERNEL_STACK_SIZE = 8192,
+    DOUBLE_FAULT_STACK_SIZE = 4096,
+};
+
+static struct gdt_layout g_gdt __attribute__((aligned(16)));
+static struct tss g_tss __attribute__((aligned(16)));
+static uint8_t g_kernel_stack[KERNEL_STACK_SIZE] __attribute__((aligned(16)));
+static uint8_t g_double_fault_stack[DOUBLE_FAULT_STACK_SIZE] __attribute__((aligned(16)));
+
 static struct gdt_layout g_gdt;
 static struct tss g_tss;
 static uint8_t g_double_fault_stack[4096] __attribute__((aligned(16)));
