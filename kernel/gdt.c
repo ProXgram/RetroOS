@@ -45,9 +45,8 @@ struct gdt_layout {
     struct tss_descriptor tss;
 } __attribute__((packed));
 
-static struct gdt_layout g_gdt __attribute__((aligned(16)));
-static struct tss g_tss __attribute__((aligned(16)));
-static uint8_t g_kernel_stack[4096] __attribute__((aligned(16)));
+static struct gdt_layout g_gdt;
+static struct tss g_tss;
 static uint8_t g_double_fault_stack[4096] __attribute__((aligned(16)));
 
 static void gdt_set_entry(struct gdt_entry64* entry, uint32_t base, uint32_t limit, uint8_t access,
