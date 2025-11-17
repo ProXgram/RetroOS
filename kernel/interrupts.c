@@ -309,6 +309,11 @@ void interrupts_init(void) {
 
     pic_remap_and_mask();
 
+    /*
+     * The legacy PIC is intentionally left at its BIOS-provided offsets.
+     * We only install exception handlers here; remapping or masking the PIC
+     * would need to happen alongside an IRQ enabling path (not present yet).
+     */
     idt_set_gate(0, handler_0);
     idt_set_gate(1, handler_1);
     idt_set_gate(2, handler_2);
