@@ -4,6 +4,7 @@
 #include <stddef.h>
 #include <stdint.h>
 #include "syslog.h"
+#include "io.h"
 
 struct interrupt_frame {
     uint64_t rip;
@@ -29,6 +30,13 @@ struct idt_descriptor {
 } __attribute__((packed));
 
 static struct idt_entry g_idt[256];
+
+enum {
+    PIC1_COMMAND = 0x20,
+    PIC1_DATA = 0x21,
+    PIC2_COMMAND = 0xA0,
+    PIC2_DATA = 0xA1,
+};
 
 static void syslog_write_hex(const char* label, uint64_t value) {
     char buffer[96];
@@ -56,6 +64,32 @@ static void halt_on_invalid(const char* message) {
     for (;;) {
         __asm__ volatile("cli; hlt");
     }
+}
+
+static void pic_remap_and_mask(void) {
+    /* Masked remap to move IRQs off exception vectors. */
+
+    /* Start the initialization sequence (cascade, expect ICW4). */
+    outb(PIC1_COMMAND, 0x11);
+    outb(PIC2_COMMAND, 0x11);
+
+    /* Set vector offsets to 0x20-0x2F. */
+    outb(PIC1_DATA, 0x20);
+    outb(PIC2_DATA, 0x28);
+
+    /* Tell the master that a slave is on IRQ2, and the slave its cascade identity. */
+    outb(PIC1_DATA, 0x04);
+    outb(PIC2_DATA, 0x02);
+
+    /* Set 8086/88 (MCS-80/85) mode. */
+    outb(PIC1_DATA, 0x01);
+    outb(PIC2_DATA, 0x01);
+
+    /* Leave everything masked until real IRQ handlers exist. */
+    outb(PIC1_DATA, 0xFF);
+    outb(PIC2_DATA, 0xFF);
+
+    syslog_write("PIC remapped to 0x20/0x28 and masked");
 }
 
 static const char* const EXCEPTION_NAMES[] = {
@@ -272,6 +306,8 @@ static void idt_set_gate_with_ist(uint8_t vector, void* handler, uint8_t ist) {
 
 void interrupts_init(void) {
     syslog_write("Trace: entering interrupts_init");
+
+    pic_remap_and_mask();
 
     /*
      * The legacy PIC is intentionally left at its BIOS-provided offsets.
