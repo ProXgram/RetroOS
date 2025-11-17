@@ -112,6 +112,7 @@ void gdt_init(void) {
     g_tss.reserved2 = 0;
     g_tss.reserved3 = 0;
     g_tss.io_map_base = (uint16_t)sizeof(g_tss);
+    g_tss.rsp[0] = (uint64_t)(g_kernel_stack + sizeof(g_kernel_stack));
     g_tss.ist[0] = (uint64_t)(g_double_fault_stack + sizeof(g_double_fault_stack));
 
     gdt_set_entry(&g_gdt.null, 0, 0, 0, 0);

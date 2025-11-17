@@ -222,6 +222,17 @@ static void idt_set_gate(uint8_t vector, void* handler) {
     g_idt[vector].zero = 0;
 }
 
+static void idt_set_gate_with_ist(uint8_t vector, void* handler, uint8_t ist) {
+    uint64_t address = (uint64_t)handler;
+    g_idt[vector].offset_low = (uint16_t)(address & 0xFFFF);
+    g_idt[vector].selector = 0x08;
+    g_idt[vector].ist = ist;
+    g_idt[vector].type_attr = 0x8E;
+    g_idt[vector].offset_mid = (uint16_t)((address >> 16) & 0xFFFF);
+    g_idt[vector].offset_high = (uint32_t)((address >> 32) & 0xFFFFFFFF);
+    g_idt[vector].zero = 0;
+}
+
 void interrupts_init(void) {
     idt_set_gate(0, handler_0);
     idt_set_gate(1, handler_1);
@@ -231,7 +242,7 @@ void interrupts_init(void) {
     idt_set_gate(5, handler_5);
     idt_set_gate(6, handler_6);
     idt_set_gate(7, handler_7);
-    idt_set_gate(8, handler_8);
+    idt_set_gate_with_ist(8, handler_8, 1);
     idt_set_gate(9, handler_9);
     idt_set_gate(10, handler_10);
     idt_set_gate(11, handler_11);
