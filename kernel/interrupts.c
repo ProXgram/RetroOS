@@ -151,12 +151,22 @@ static void panic_write_vector_line(uint8_t vector) {
     panic_write_line(buffer);
 }
 
-static void exception_panic(uint8_t vector, uint64_t error_code, bool has_error_code) {
+static void exception_panic(uint8_t vector,
+                            uint64_t error_code,
+                            bool has_error_code,
+                            const struct interrupt_frame* frame) {
     panic_clear_screen();
     panic_write_line("!!! CPU EXCEPTION !!!");
     panic_write_vector_line(vector);
     if (has_error_code) {
         panic_write_hex_line("Error code: ", error_code);
+    }
+    if (frame != NULL) {
+        panic_write_hex_line("RIP: ", frame->rip);
+        panic_write_hex_line("CS: ", frame->cs);
+        panic_write_hex_line("RFLAGS: ", frame->rflags);
+        panic_write_hex_line("RSP: ", frame->rsp);
+        panic_write_hex_line("SS: ", frame->ss);
     }
     panic_write_line("System halted.");
     for (;;) {
@@ -166,15 +176,13 @@ static void exception_panic(uint8_t vector, uint64_t error_code, bool has_error_
 
 #define DECLARE_NOERR_HANDLER(num)                                                               \
     __attribute__((interrupt)) static void handler_##num(struct interrupt_frame* frame) {        \
-        (void)frame;                                                                              \
-        exception_panic((uint8_t)(num), 0, false);                                                \
+        exception_panic((uint8_t)(num), 0, false, frame);                                         \
     }
 
 #define DECLARE_ERR_HANDLER(num)                                                                 \
     __attribute__((interrupt)) static void handler_##num(struct interrupt_frame* frame,          \
                                                          uint64_t error_code) {                  \
-        (void)frame;                                                                              \
-        exception_panic((uint8_t)(num), error_code, true);                                        \
+        exception_panic((uint8_t)(num), error_code, true, frame);                                 \
     }
 
 DECLARE_NOERR_HANDLER(0);
