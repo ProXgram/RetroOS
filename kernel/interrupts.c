@@ -272,6 +272,12 @@ static void idt_set_gate_with_ist(uint8_t vector, void* handler, uint8_t ist) {
 
 void interrupts_init(void) {
     syslog_write("Trace: entering interrupts_init");
+
+    /*
+     * The legacy PIC is intentionally left at its BIOS-provided offsets.
+     * We only install exception handlers here; remapping or masking the PIC
+     * would need to happen alongside an IRQ enabling path (not present yet).
+     */
     idt_set_gate(0, handler_0);
     idt_set_gate(1, handler_1);
     idt_set_gate(2, handler_2);
