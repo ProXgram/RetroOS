@@ -3,6 +3,7 @@
 #include <stdbool.h>
 #include <stddef.h>
 #include <stdint.h>
+#include "syslog.h"
 
 struct interrupt_frame {
     uint64_t rip;
@@ -234,6 +235,7 @@ static void idt_set_gate_with_ist(uint8_t vector, void* handler, uint8_t ist) {
 }
 
 void interrupts_init(void) {
+    syslog_write("Trace: entering interrupts_init");
     idt_set_gate(0, handler_0);
     idt_set_gate(1, handler_1);
     idt_set_gate(2, handler_2);
@@ -273,4 +275,5 @@ void interrupts_init(void) {
     };
 
     __asm__ volatile("lidt %0" : : "m"(descriptor));
+    syslog_write("Trace: interrupts_init complete");
 }

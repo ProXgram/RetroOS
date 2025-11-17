@@ -6,6 +6,7 @@ section .text
     extern gdt_init
     extern interrupts_init
     extern paging_init
+    extern syslog_init
     extern __bss_start
     extern __bss_end
 
@@ -19,6 +20,7 @@ _start:
     xor rax, rax
     rep stosb
 
+    call syslog_init
     call paging_init
     call gdt_init
     call interrupts_init

@@ -9,7 +9,6 @@
 #include "terminal.h"
 
 static void boot_sequence(const struct BootInfo* boot_info) {
-    syslog_init();
     syslog_write("Boot: entered kernel");
 
     system_cache_boot_info(boot_info);
@@ -24,6 +23,7 @@ static void boot_sequence(const struct BootInfo* boot_info) {
 }
 
 void kmain(const struct BootInfo* boot_info) {
+    syslog_write("Trace: entered kmain");
     boot_sequence(boot_info);
 
     syslog_write("Shell: starting interactive console");
