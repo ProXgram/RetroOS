@@ -16,6 +16,8 @@ _start:
     cli
 
     mov rbp, 0
+    and rsp, -16              ; Align the stack to 16 bytes for System V ABI
+    sub rsp, 8                ; Account for a return address push to keep 16-byte alignment before calls
 
     mov r12, rdi                ; preserve BootInfo pointer
     mov rdi, __bss_start
