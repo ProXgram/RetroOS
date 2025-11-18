@@ -22,6 +22,8 @@ OS_IMAGE := $(BUILD_DIR)/NostaluxOS.img
 KERNEL_SRCS := $(wildcard kernel/*.c)
 KERNEL_OBJS := $(patsubst kernel/%.c,$(BUILD_DIR)/%.o,$(KERNEL_SRCS))
 
+QEMU ?= qemu-system-x86_64
+
 .PHONY: all clean run check-conflicts
 
 all: check-conflicts $(OS_IMAGE)
@@ -73,4 +75,5 @@ clean:
 	rm -rf $(BUILD_DIR)
 
 run: check-conflicts $(OS_IMAGE)
+	$(QEMU) $(if $(HEADLESS),-display none -serial mon:stdio,) -drive format=raw,file=$(OS_IMAGE)
 	qemu-system-x86_64 -display none -serial mon:stdio -drive format=raw,file=$(OS_IMAGE)
