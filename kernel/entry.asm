@@ -11,6 +11,10 @@ section .text
     extern __bss_end
 
 _start:
+    ; Disable interrupts while the IDT is being built to avoid spurious faults
+    ; on an uninitialized table.
+    cli
+
     mov rbp, 0
 
     mov r12, rdi                ; preserve BootInfo pointer
@@ -24,6 +28,9 @@ _start:
     call paging_init
     call gdt_init
     call interrupts_init
+
+    ; Re-enable interrupts now that the IDT and PIC are configured.
+    sti
 
     mov rdi, r12                ; restore BootInfo pointer
     call kmain
