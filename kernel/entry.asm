@@ -33,6 +33,13 @@ _start:
     xor rax, rax
     rep stosb
 
+    ; Switch to the dedicated kernel stack after zeroing .bss so we don't
+    ; clobber an in-use stack frame while clearing the kernel's own stack
+    ; memory.
+    mov rsp, g_kernel_stack_top
+    and rsp, -16              ; Align the stack to 16 bytes for System V ABI
+    sub rsp, 8                ; Account for a return address push to keep 16-byte alignment before calls
+
     call syslog_init
     call paging_init
     call gdt_init
