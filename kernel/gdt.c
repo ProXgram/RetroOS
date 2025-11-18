@@ -56,7 +56,8 @@ enum {
     DOUBLE_FAULT_STACK_SIZE = 4096,
 };
 
-static uint8_t g_kernel_stack[KERNEL_STACK_SIZE] __attribute__((aligned(16)));
+uint8_t g_kernel_stack[KERNEL_STACK_SIZE] __attribute__((aligned(16)));
+uint8_t* const g_kernel_stack_top = g_kernel_stack + KERNEL_STACK_SIZE;
 static uint8_t g_double_fault_stack[DOUBLE_FAULT_STACK_SIZE] __attribute__((aligned(16)));
 static struct tss g_tss __attribute__((aligned(16))) = {
     .rsp = {[0] = (uint64_t)(g_kernel_stack + sizeof(g_kernel_stack))},
@@ -148,13 +149,12 @@ void gdt_init(void) {
     g_tss.rsp[0] = (uint64_t)(g_kernel_stack + sizeof(g_kernel_stack));
     g_tss.ist[0] = (uint64_t)(g_double_fault_stack + sizeof(g_double_fault_stack));
 
-    // Give the code/data segments a full 4 GiB limit so stack and data
-    // accesses can never trip a limit check after the far jump below.
-    // The flags set granularity (G) and, for code, the long-mode bit (L).
-    const uint32_t segment_limit = 0xFFFFF;
+    // Long mode largely ignores limits and attributes; only the code descriptor's
+    // L bit matters. Use a flat 64-bit model with zeroed limits and no granularity
+    // to avoid any lingering limit checks contributing to a #GP at early boot.
     gdt_set_entry(&g_gdt.null, 0, 0, 0, 0);
-    gdt_set_entry(&g_gdt.code, 0, segment_limit, 0x9A, 0xA0); // 64-bit code (L + G)
-    gdt_set_entry(&g_gdt.data, 0, segment_limit, 0x92, 0xC0); // 64-bit data (D + G)
+    gdt_set_entry(&g_gdt.code, 0, 0, 0x9A, 0x20); // 64-bit code (L)
+    gdt_set_entry(&g_gdt.data, 0, 0, 0x92, 0x00); // 64-bit data
     gdt_set_tss_entry(&g_gdt.tss, (uint64_t)&g_tss, (uint32_t)sizeof(g_tss) - 1);
 
     const struct gdt_descriptor descriptor = {

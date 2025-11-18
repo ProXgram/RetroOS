@@ -9,9 +9,20 @@ section .text
     extern syslog_init
     extern __bss_start
     extern __bss_end
+    extern g_kernel_stack_top
 
 _start:
+    ; Disable interrupts while the IDT is being built to avoid spurious faults
+    ; on an uninitialized table.
+    cli
+
     mov rbp, 0
+
+    ; Switch to the dedicated kernel stack rather than the bootloader-provided one
+    ; to avoid exhausting the limited handoff stack during early initialization.
+    mov rsp, g_kernel_stack_top
+    and rsp, -16              ; Align the stack to 16 bytes for System V ABI
+    sub rsp, 8                ; Account for a return address push to keep 16-byte alignment before calls
 
     mov r12, rdi                ; preserve BootInfo pointer
     mov rdi, __bss_start
@@ -24,6 +35,9 @@ _start:
     call paging_init
     call gdt_init
     call interrupts_init
+
+    ; Re-enable interrupts now that the IDT and PIC are configured.
+    sti
 
     mov rdi, r12                ; restore BootInfo pointer
     call kmain
