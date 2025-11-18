@@ -92,6 +92,15 @@ static void pic_remap_and_mask(void) {
     syslog_write("PIC remapped to 0x20/0x28 and masked");
 }
 
+static void pic_send_eoi(uint8_t vector) {
+    const uint8_t irq = (uint8_t)(vector - 0x20);
+
+    if (irq >= 8) {
+        outb(PIC2_COMMAND, 0x20);
+    }
+    outb(PIC1_COMMAND, 0x20);
+}
+
 static const char* const EXCEPTION_NAMES[] = {
     "Divide-by-zero",
     "Debug",
@@ -282,6 +291,16 @@ DECLARE_NOERR_HANDLER(29);
 DECLARE_NOERR_HANDLER(30);
 DECLARE_NOERR_HANDLER(31);
 
+__attribute__((interrupt)) static void handler_irq_master(struct interrupt_frame* frame) {
+    (void)frame;
+    pic_send_eoi(0x20);
+}
+
+__attribute__((interrupt)) static void handler_irq_slave(struct interrupt_frame* frame) {
+    (void)frame;
+    pic_send_eoi(0x28);
+}
+
 static void idt_set_gate(uint8_t vector, void* handler) {
     uint64_t address = (uint64_t)handler;
     g_idt[vector].offset_low = (uint16_t)(address & 0xFFFF);
@@ -309,11 +328,6 @@ void interrupts_init(void) {
 
     pic_remap_and_mask();
 
-    /*
-     * The legacy PIC is intentionally left at its BIOS-provided offsets.
-     * We only install exception handlers here; remapping or masking the PIC
-     * would need to happen alongside an IRQ enabling path (not present yet).
-     */
     idt_set_gate(0, handler_0);
     idt_set_gate(1, handler_1);
     idt_set_gate(2, handler_2);
@@ -346,6 +360,13 @@ void interrupts_init(void) {
     idt_set_gate(29, handler_29);
     idt_set_gate(30, handler_30);
     idt_set_gate(31, handler_31);
+
+    for (uint8_t vector = 0x20; vector < 0x28; vector++) {
+        idt_set_gate(vector, handler_irq_master);
+    }
+    for (uint8_t vector = 0x28; vector < 0x30; vector++) {
+        idt_set_gate(vector, handler_irq_slave);
+    }
 
     const struct idt_descriptor descriptor = {
         .limit = (uint16_t)(sizeof(g_idt) - 1),
