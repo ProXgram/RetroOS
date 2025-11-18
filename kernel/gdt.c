@@ -56,7 +56,8 @@ enum {
     DOUBLE_FAULT_STACK_SIZE = 4096,
 };
 
-static uint8_t g_kernel_stack[KERNEL_STACK_SIZE] __attribute__((aligned(16)));
+uint8_t g_kernel_stack[KERNEL_STACK_SIZE] __attribute__((aligned(16)));
+uint8_t* const g_kernel_stack_top = g_kernel_stack + KERNEL_STACK_SIZE;
 static uint8_t g_double_fault_stack[DOUBLE_FAULT_STACK_SIZE] __attribute__((aligned(16)));
 static struct tss g_tss __attribute__((aligned(16))) = {
     .rsp = {[0] = (uint64_t)(g_kernel_stack + sizeof(g_kernel_stack))},
