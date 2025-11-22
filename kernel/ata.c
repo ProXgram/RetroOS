@@ -1,7 +1,7 @@
 #include "ata.h"
 #include "io.h"
 #include "syslog.h"
-#include "kstdio.h" // Assuming you added kstdio from the previous step, otherwise use terminal
+#include "kstdio.h"
 
 #define ATA_DATA        0x1F0
 #define ATA_ERROR       0x1F1
@@ -21,35 +21,46 @@
 #define STATUS_DRQ      0x08
 #define STATUS_ERR      0x01
 
-static void ata_wait_bsy(void) {
-    while (inb(ATA_STATUS) & STATUS_BSY);
+// 100,000 iterations is plenty for PIO in QEMU
+// If it takes longer, the drive is likely stuck.
+#define ATA_TIMEOUT     100000 
+
+static bool ata_wait_bsy(void) {
+    int timeout = ATA_TIMEOUT;
+    while (inb(ATA_STATUS) & STATUS_BSY) {
+        if (--timeout == 0) {
+            syslog_write("ATA: Timeout waiting for BSY to clear");
+            return false;
+        }
+    }
+    return true;
 }
 
-static void ata_wait_drq(void) {
-    while (!(inb(ATA_STATUS) & STATUS_DRQ));
+static bool ata_wait_drq(void) {
+    int timeout = ATA_TIMEOUT;
+    while (!(inb(ATA_STATUS) & STATUS_DRQ)) {
+        if (--timeout == 0) {
+            syslog_write("ATA: Timeout waiting for DRQ to set");
+            return false;
+        }
+    }
+    return true;
 }
 
-/* 
- * Selects the drive and standard LBA28 parameters.
- * Note: 0xE0 = 11100000 (Mode=LBA, Drive=Master, Top 4 bits of LBA=0 for now)
- */
 static void ata_select_drive(void) {
     outb(ATA_DRIVE_HEAD, 0xE0); 
 }
 
 bool ata_init(void) {
-    // Check for floating bus
     uint8_t status = inb(ATA_STATUS);
     if (status == 0xFF) {
-        syslog_write("ATA: No drive detected on Primary Bus");
+        // Floating bus, no drive
         return false;
     }
 
-    // Soft Reset (Optional, but good practice)
     ata_select_drive();
     io_wait();
     
-    // Identify command to ensure drive exists and is working
     outb(ATA_SECTOR_CNT, 0);
     outb(ATA_LBA_LOW, 0);
     outb(ATA_LBA_MID, 0);
@@ -57,24 +68,22 @@ bool ata_init(void) {
     outb(ATA_COMMAND, CMD_IDENTIFY);
     
     status = inb(ATA_STATUS);
-    if (status == 0) {
-        syslog_write("ATA: Drive does not exist");
-        return false;
-    }
+    if (status == 0) return false;
 
-    ata_wait_bsy();
+    if (!ata_wait_bsy()) return false;
     
-    // Read the identification data (256 words) to clear buffer
-    // We don't store it for now, but we must read it.
+    // Read Identify data
     uint16_t tmp[256];
-    insw(ATA_DATA, tmp, 256);
-
-    syslog_write("ATA: Primary Master initialized (PIO Mode)");
+    // Check DRQ before reading
+    if (inb(ATA_STATUS) & STATUS_DRQ) {
+         insw(ATA_DATA, tmp, 256);
+    }
+    
     return true;
 }
 
-void ata_read(uint32_t lba, uint8_t count, uint8_t* buffer) {
-    ata_wait_bsy();
+bool ata_read(uint32_t lba, uint8_t count, uint8_t* buffer) {
+    if (!ata_wait_bsy()) return false;
     
     outb(ATA_DRIVE_HEAD, 0xE0 | ((lba >> 24) & 0x0F));
     outb(ATA_SECTOR_CNT, count);
@@ -84,14 +93,15 @@ void ata_read(uint32_t lba, uint8_t count, uint8_t* buffer) {
     outb(ATA_COMMAND, CMD_READ_PIO);
 
     for (int i = 0; i < count; i++) {
-        ata_wait_bsy();
-        ata_wait_drq();
+        if (!ata_wait_bsy()) return false;
+        if (!ata_wait_drq()) return false;
         insw(ATA_DATA, buffer + (i * 512), 256);
     }
+    return true;
 }
 
-void ata_write(uint32_t lba, uint8_t count, const uint8_t* buffer) {
-    ata_wait_bsy();
+bool ata_write(uint32_t lba, uint8_t count, const uint8_t* buffer) {
+    if (!ata_wait_bsy()) return false;
 
     outb(ATA_DRIVE_HEAD, 0xE0 | ((lba >> 24) & 0x0F));
     outb(ATA_SECTOR_CNT, count);
@@ -101,13 +111,13 @@ void ata_write(uint32_t lba, uint8_t count, const uint8_t* buffer) {
     outb(ATA_COMMAND, CMD_WRITE_PIO);
 
     for (int i = 0; i < count; i++) {
-        ata_wait_bsy();
-        // Note: For write, we wait for DRQ *before* sending data
-        ata_wait_drq();
+        if (!ata_wait_bsy()) return false;
+        if (!ata_wait_drq()) return false;
+        
         outsw(ATA_DATA, buffer + (i * 512), 256);
         
-        // Flush cache / wait for write to finish
-        outb(ATA_COMMAND, 0xE7); // Cache Flush (Optional but safe)
-        ata_wait_bsy();
+        outb(ATA_COMMAND, 0xE7); // Flush
+        if (!ata_wait_bsy()) return false;
     }
+    return true;
 }
