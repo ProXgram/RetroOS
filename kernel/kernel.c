@@ -3,6 +3,7 @@
 
 #include "background.h"
 #include "fs.h"
+#include "memtest.h"
 #include "shell.h"
 #include "system.h"
 #include "syslog.h"
@@ -16,6 +17,11 @@ static void boot_sequence(const struct BootInfo* boot_info) {
 
     terminal_initialize(cached->width, cached->height);
     syslog_write("Boot: terminal initialized");
+
+    // Detect available memory and update system profile
+    size_t memory_bytes = memtest_detect_upper_limit();
+    system_set_total_memory((uint32_t)(memory_bytes / 1024));
+    syslog_write("Boot: memory detection complete");
 
     background_render();
     fs_init();
