@@ -12,23 +12,23 @@ static struct fs_file FILES[FS_MAX_FILES];
 
 // Helper to persist data to the disk
 static void fs_sync_to_disk(void) {
-    if (!ata_init()) return; // Cannot sync if drive fails
+    if (!ata_init()) return; 
 
-    // Calculate sectors needed
-    // sizeof(FILES) is roughly 34KB => ~68 sectors
     uint32_t total_bytes = sizeof(FILES);
     uint8_t sectors = (uint8_t)((total_bytes + 511) / 512);
 
-    // Write metadata (Magic Number) at FS_STORAGE_LBA
-    // We use the first 4 bytes of a sector to store magic, rest is 0
-    uint32_t magic_sector[128]; // 128 * 4 bytes = 512 bytes
+    uint32_t magic_sector[128];
     for (int i = 0; i < 128; i++) magic_sector[i] = 0;
     magic_sector[0] = FS_MAGIC_VAL;
     
-    ata_write(FS_STORAGE_LBA, 1, (uint8_t*)magic_sector);
+    if (!ata_write(FS_STORAGE_LBA, 1, (uint8_t*)magic_sector)) {
+        syslog_write("FS: Disk sync failed (write magic)");
+        return;
+    }
 
-    // Write actual data at FS_STORAGE_LBA + 1
-    ata_write(FS_STORAGE_LBA + 1, sectors, (uint8_t*)FILES);
+    if (!ata_write(FS_STORAGE_LBA + 1, sectors, (uint8_t*)FILES)) {
+        syslog_write("FS: Disk sync failed (write data)");
+    }
 }
 
 // Helper to load data from the disk
@@ -36,18 +36,22 @@ static bool fs_load_from_disk(void) {
     if (!ata_init()) return false;
 
     uint32_t magic_sector[128];
-    ata_read(FS_STORAGE_LBA, 1, (uint8_t*)magic_sector);
+    if (!ata_read(FS_STORAGE_LBA, 1, (uint8_t*)magic_sector)) {
+        return false;
+    }
 
     if (magic_sector[0] != FS_MAGIC_VAL) {
-        return false; // Not formatted or invalid magic
+        return false; 
     }
 
     uint32_t total_bytes = sizeof(FILES);
     uint8_t sectors = (uint8_t)((total_bytes + 511) / 512);
     
-    ata_read(FS_STORAGE_LBA + 1, sectors, (uint8_t*)FILES);
+    if (!ata_read(FS_STORAGE_LBA + 1, sectors, (uint8_t*)FILES)) {
+        return false;
+    }
 
-    // Sanitize loaded data to prevent crashes if disk is corrupted
+    // Sanitize loaded data
     for (int i = 0; i < FS_MAX_FILES; i++) {
         FILES[i].name[FS_MAX_FILENAME - 1] = '\0';
         FILES[i].data[FS_MAX_FILE_SIZE - 1] = '\0';
@@ -65,7 +69,6 @@ static void fs_clear(struct fs_file* file) {
     if (file == NULL) {
         return;
     }
-
     file->in_use = false;
     file->name[0] = '\0';
     file->size = 0;
@@ -73,22 +76,14 @@ static void fs_clear(struct fs_file* file) {
 }
 
 static bool fs_is_valid_name(const char* name) {
-    if (name == NULL || *name == '\0') {
-        return false;
-    }
-
+    if (name == NULL || *name == '\0') return false;
     size_t length = 0;
     while (name[length] != '\0') {
         char c = name[length];
-        if (c == ' ' || c == '\t' || c == '/' || c == '\\') {
-            return false;
-        }
+        if (c == ' ' || c == '\t' || c == '/' || c == '\\') return false;
         length++;
-        if (length >= FS_MAX_FILENAME) {
-            return false;
-        }
+        if (length >= FS_MAX_FILENAME) return false;
     }
-
     return true;
 }
 
@@ -102,34 +97,22 @@ static void fs_copy_name(struct fs_file* file, const char* name) {
 }
 
 static struct fs_file* fs_find_mutable(const char* name) {
-    if (name == NULL) {
-        return NULL;
-    }
-
+    if (name == NULL) return NULL;
     for (size_t i = 0; i < FS_MAX_FILES; i++) {
-        if (!FILES[i].in_use) {
-            continue;
-        }
-        if (kstrcmp(FILES[i].name, name) == 0) {
-            return &FILES[i];
-        }
+        if (!FILES[i].in_use) continue;
+        if (kstrcmp(FILES[i].name, name) == 0) return &FILES[i];
     }
-
     return NULL;
 }
 
 static struct fs_file* fs_allocate_slot(void) {
     for (size_t i = 0; i < FS_MAX_FILES; i++) {
-        if (!FILES[i].in_use) {
-            return &FILES[i];
-        }
+        if (!FILES[i].in_use) return &FILES[i];
     }
     return NULL;
 }
 
 static bool fs_seed_file(const char* name, const char* contents) {
-    // Internal helper for initialization.
-    // Does NOT trigger immediate sync to allow batch initialization.
     struct fs_file* existing = fs_find_mutable(name);
     struct fs_file* target = existing;
 
@@ -184,7 +167,6 @@ void fs_init(void) {
 
     syslog_write("FS: mounted fresh volume (unsaved)");
     
-    // Save the fresh state immediately
     fs_sync_to_disk();
     syslog_write("FS: filesystem formatted and saved");
     
@@ -194,9 +176,7 @@ void fs_init(void) {
 size_t fs_file_count(void) {
     size_t count = 0;
     for (size_t i = 0; i < FS_MAX_FILES; i++) {
-        if (FILES[i].in_use) {
-            count++;
-        }
+        if (FILES[i].in_use) count++;
     }
     return count;
 }
@@ -204,12 +184,8 @@ size_t fs_file_count(void) {
 const struct fs_file* fs_file_at(size_t index) {
     size_t seen = 0;
     for (size_t i = 0; i < FS_MAX_FILES; i++) {
-        if (!FILES[i].in_use) {
-            continue;
-        }
-        if (seen == index) {
-            return &FILES[i];
-        }
+        if (!FILES[i].in_use) continue;
+        if (seen == index) return &FILES[i];
         seen++;
     }
     return NULL;
@@ -220,19 +196,13 @@ const struct fs_file* fs_find(const char* name) {
 }
 
 bool fs_touch(const char* name) {
-    if (!fs_is_valid_name(name)) {
-        return false;
-    }
+    if (!fs_is_valid_name(name)) return false;
 
     struct fs_file* existing = fs_find_mutable(name);
-    if (existing != NULL) {
-        return true;
-    }
+    if (existing != NULL) return true;
 
     struct fs_file* slot = fs_allocate_slot();
-    if (slot == NULL) {
-        return false;
-    }
+    if (slot == NULL) return false;
 
     slot->in_use = true;
     fs_copy_name(slot, name);
@@ -244,26 +214,17 @@ bool fs_touch(const char* name) {
 }
 
 bool fs_write(const char* name, const char* contents) {
-    if (name == NULL || contents == NULL) {
-        return false;
-    }
+    if (name == NULL || contents == NULL) return false;
 
     bool existed = fs_find_mutable(name) != NULL;
-    if (!fs_touch(name)) {
-        return false;
-    }
+    if (!fs_touch(name)) return false;
 
     struct fs_file* file = fs_find_mutable(name);
-    if (file == NULL) {
-        return false;
-    }
+    if (file == NULL) return false;
 
     size_t length = kstrlen(contents);
     if (length >= FS_MAX_FILE_SIZE) {
-        // If the write fails due to size, and we just created it, cleanup.
-        if (!existed) {
-            fs_clear(file);
-        }
+        if (!existed) fs_clear(file);
         return false;
     }
 
@@ -278,25 +239,17 @@ bool fs_write(const char* name, const char* contents) {
 }
 
 bool fs_append(const char* name, const char* contents) {
-    if (name == NULL || contents == NULL) {
-        return false;
-    }
+    if (name == NULL || contents == NULL) return false;
 
     bool existed = fs_find_mutable(name) != NULL;
-    if (!fs_touch(name)) {
-        return false;
-    }
+    if (!fs_touch(name)) return false;
 
     struct fs_file* file = fs_find_mutable(name);
-    if (file == NULL) {
-        return false;
-    }
+    if (file == NULL) return false;
 
     size_t length = kstrlen(contents);
     if (file->size + length >= FS_MAX_FILE_SIZE) {
-        if (!existed) {
-            fs_clear(file);
-        }
+        if (!existed) fs_clear(file);
         return false;
     }
 
@@ -312,9 +265,7 @@ bool fs_append(const char* name, const char* contents) {
 
 bool fs_remove(const char* name) {
     struct fs_file* file = fs_find_mutable(name);
-    if (file == NULL) {
-        return false;
-    }
+    if (file == NULL) return false;
 
     fs_clear(file);
     fs_sync_to_disk();
@@ -323,13 +274,9 @@ bool fs_remove(const char* name) {
 
 static void fs_self_test(void) {
     const char* scratch = "__fs_self_test__";
-    
-    // Ensure clean slate
     struct fs_file* f = fs_find_mutable(scratch);
     if (f) fs_clear(f);
     
-    // We intentionally perform these operations without checking success
-    // in the logs unless they fail, to keep boot output clean.
     if (!fs_touch(scratch)) {
         syslog_write("FS: self-test (touch) failed");
         return;
