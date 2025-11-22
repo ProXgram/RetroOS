@@ -14,6 +14,8 @@
 #include "syslog.h"
 #include "terminal.h"
 #include "timer.h"
+#include "snake.h" // <--- INCLUDE
+#include "sound.h" // <--- INCLUDE
 
 struct shell_command {
     const char* name;
@@ -46,9 +48,12 @@ static void command_calc(const char* args);
 static void command_history(const char* args);
 static void command_palette(const char* args);
 
-// <--- NEW COMMANDS
 static void command_uptime(const char* args);
 static void command_sleep(const char* args);
+
+// NEW COMMANDS
+static void command_snake(const char* args);
+static void command_beep(const char* args);
 
 static void log_command_invocation(const char* command_name);
 
@@ -75,6 +80,8 @@ static const struct shell_command COMMANDS[] = {
     {"memtest", command_memtest, "Run memory diagnostics"},
     {"logs", command_logs, "Show system logs"},
     {"echo", command_echo, "Display text back to you"},
+    {"snake", command_snake, "Play the Snake game"}, // <--- REGISTER
+    {"beep", command_beep, "Test PC Speaker"},       // <--- REGISTER
     {"reboot", command_reboot, "Restart the system"},
     {"shutdown", command_shutdown, "Power off the system"},
 };
@@ -108,7 +115,6 @@ static uint8_t get_rtc_register(int reg) {
     return inb(CMOS_DATA);
 }
 
-// ... (Keep existing command_time implementation) ...
 static void command_time(const char* args) {
     (void)args;
     
@@ -162,9 +168,6 @@ static void command_time(const char* args) {
     terminal_newline();
 }
 
-// ... (Keep existing helpers like command_calc, color parsing) ...
-
-// <--- NEW COMMANDS IMPLEMENTATION
 static void command_uptime(const char* args) {
     (void)args;
     uint64_t seconds = timer_get_uptime();
@@ -192,8 +195,6 @@ static void command_sleep(const char* args) {
     
     terminal_writestring("Done.\n");
 }
-
-// ... (Rest of file remains unchanged below, simply pasting existing functions for context) ...
 
 static void command_calc(const char* args) {
     const char* cursor = kskip_spaces(args);
@@ -722,6 +723,21 @@ static void command_logs(const char* args) {
     }
 }
 
+static void command_snake(const char* args) {
+    (void)args;
+    snake_game_run();
+    // Restore banner after game
+    background_render();
+    shell_print_banner();
+}
+
+static void command_beep(const char* args) {
+    (void)args;
+    terminal_writestring("Beeping at 440Hz for 50 ticks...\n");
+    sound_beep(440, 50);
+    terminal_writestring("Done.\n");
+}
+
 static void command_reboot(const char* args) {
     (void)args;
     terminal_writestring("Rebooting system...\n");
@@ -849,6 +865,9 @@ static void execute_command(const char* input) {
 
 void shell_run(void) {
     char input[INPUT_CAPACITY];
+    
+    // Ensure sound is off on startup
+    sound_init();
 
     shell_print_banner();
 
