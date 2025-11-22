@@ -2,11 +2,18 @@
 #define KEYBOARD_H
 
 #include <stddef.h>
+#include <stdint.h>
 
 enum {
     KEYBOARD_MAX_LINE = 128,
     KEYBOARD_HISTORY_LIMIT = 16,
 };
+
+/* Initializes the keyboard driver and unmasks IRQ 1 */
+void keyboard_init(void);
+
+/* Called by the interrupt handler (IRQ1) to push raw scancodes */
+void keyboard_push_byte(uint8_t byte);
 
 char keyboard_get_char(void);
 void keyboard_read_line(char* buffer, size_t size);
