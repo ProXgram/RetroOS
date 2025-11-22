@@ -21,6 +21,14 @@ PML4            equ 0x00200000
 PDPT            equ 0x00201000
 PD              equ 0x00202000
 PD_HIGH         equ 0x00203000
+; Keep early allocations above the bootloader+kernel payload so they do not
+; trample the copied kernel bytes before the handoff to long mode.
+PROTECTED_STACK equ 0x00080000
+LONG_STACK_TOP  equ 0x001FF000
+PML4            equ 0x00020000
+PDPT            equ 0x00021000
+PD              equ 0x00022000
+PD_HIGH         equ 0x00023000
 BOOT_INFO       equ 0x00005000
 
 stage2_start:
