@@ -63,6 +63,11 @@ static const struct keymap_entry KEYMAP_SET1[128] = {
     [0x2F] = KM('v', 'V'), [0x30] = KM('b', 'B'), [0x31] = KM('n', 'N'),
     [0x32] = KM('m', 'M'), [0x33] = KM(',', '<'), [0x34] = KM('.', '>'),
     [0x35] = KM('/', '?'), [0x39] = KM(' ', ' '),
+    // Basic Arrow Key Mapping (Extended scan codes mapped to high values for logic)
+    [0x48] = KM('w', 'W'), // Up (Mapped to W for simplicity if raw)
+    [0x4B] = KM('a', 'A'), // Left
+    [0x50] = KM('s', 'S'), // Down
+    [0x4D] = KM('d', 'D'), // Right
 };
 
 /* --- Driver Core --- */
@@ -91,6 +96,16 @@ static uint8_t keyboard_pop_byte(void) {
     return byte;
 }
 
+// NEW: Non-blocking pop
+static bool keyboard_try_pop_byte(uint8_t* out) {
+    if (g_kb_head == g_kb_tail) {
+        return false;
+    }
+    *out = g_kb_buffer[g_kb_tail];
+    g_kb_tail = (g_kb_tail + 1) & SCANCODE_BUFFER_MASK;
+    return true;
+}
+
 /* --- Translation Logic --- */
 
 static uint16_t keyboard_read_scancode(void) {
@@ -103,6 +118,29 @@ static uint16_t keyboard_read_scancode(void) {
         }
         return prefix | val;
     }
+}
+
+// NEW: Non-blocking scancode read
+static bool keyboard_poll_scancode(uint16_t* out_code) {
+    uint8_t val;
+    static uint16_t prefix = 0;
+    
+    // This state machine is simplified for non-blocking; 
+    // if we have a prefix but no second byte, we return false
+    // effectively waiting for the next poll cycle.
+    
+    if (!keyboard_try_pop_byte(&val)) {
+        return false;
+    }
+
+    if (val == SCANCODE_EXTENDED) {
+        prefix = SCANCODE_EXTENDED_MASK;
+        return false; // Consumed prefix, try again next poll
+    }
+
+    *out_code = prefix | val;
+    prefix = 0; // Reset
+    return true;
 }
 
 static void update_modifiers(uint8_t scancode, bool released) {
@@ -197,7 +235,7 @@ const char* keyboard_history_step(int dir) {
 }
 
 /* --- Line Editing Utilities --- */
-
+// (Keeping existing static helpers: edit_clear, edit_replace, edit_insert, edit_delete)
 static void edit_clear(size_t cursor, size_t length) {
     if (length == 0) return;
     terminal_begin_batch();
@@ -278,6 +316,21 @@ char keyboard_get_char(void) {
         char c = translate_scancode(scan);
         if (c) return c;
     }
+}
+
+// NEW: Poll function
+char keyboard_poll_char(void) {
+    uint16_t raw;
+    if (!keyboard_poll_scancode(&raw)) return 0;
+
+    bool released = (raw & SCANCODE_RELEASE_MASK);
+    bool extended = (raw & SCANCODE_EXTENDED_MASK);
+    uint8_t scan = raw & 0x7F;
+
+    update_modifiers(scan, released);
+    if (released || extended) return 0;
+
+    return translate_scancode(scan);
 }
 
 void keyboard_read_line(char* buffer, size_t size) {
