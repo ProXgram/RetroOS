@@ -59,6 +59,10 @@ void system_cache_boot_info(const struct BootInfo* boot_info) {
     syslog_write("System: hardware descriptors cached");
 }
 
+void system_set_total_memory(uint32_t total_kb) {
+    g_profile.memory_total_kb = total_kb;
+}
+
 const struct BootInfo* system_boot_info(void) {
     return &g_boot_info;
 }
