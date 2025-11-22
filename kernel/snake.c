@@ -3,12 +3,18 @@
 #include "keyboard.h"
 #include "timer.h"
 #include "sound.h"
+#include "graphics.h" 
 #include <stdint.h>
 #include <stdbool.h>
 
-#define SCREEN_W 80
-#define SCREEN_H 25
-#define MAX_SNAKE (SCREEN_W * SCREEN_H)
+#define BLOCK_SIZE 16 
+#define GRID_MAX_W 80
+#define GRID_MAX_H 60
+#define MAX_SNAKE (GRID_MAX_W * GRID_MAX_H)
+
+// Logical grid dimensions (calculated at runtime)
+static int grid_w;
+static int grid_h;
 
 typedef struct {
     int x;
@@ -33,8 +39,8 @@ static void spawn_fruit(void) {
     bool collision;
     do {
         collision = false;
-        fruit.x = rand() % (SCREEN_W - 2) + 1;
-        fruit.y = rand() % (SCREEN_H - 2) + 1;
+        fruit.x = rand() % (grid_w - 2) + 1;
+        fruit.y = rand() % (grid_h - 2) + 1;
 
         for (int i = 0; i < snake_len; i++) {
             if (snake[i].x == fruit.x && snake[i].y == fruit.y) {
@@ -45,37 +51,47 @@ static void spawn_fruit(void) {
     } while (collision);
 }
 
-static void draw_point(int x, int y, char c, uint8_t fg, uint8_t bg) {
-    // FIXED: Removed terminal_set_theme() call.
-    // calling terminal_* functions triggers a screen refresh from the text buffer,
-    // which overwrites the game graphics. We write directly to VRAM instead.
-    
-    volatile uint16_t* vga = (volatile uint16_t*)0xB8000;
-    uint16_t attrib = (uint16_t)((bg << 4) | (fg & 0x0F));
-    vga[y * SCREEN_W + x] = (uint16_t)c | (attrib << 8);
+static void draw_block(int x, int y, uint32_t color) {
+    graphics_fill_rect(x * BLOCK_SIZE, y * BLOCK_SIZE, BLOCK_SIZE, BLOCK_SIZE, color);
 }
 
 void snake_game_run(void) {
+    // Initialize grid based on actual screen size
+    grid_w = graphics_get_width() / BLOCK_SIZE;
+    grid_h = graphics_get_height() / BLOCK_SIZE;
+    if (grid_w > GRID_MAX_W) grid_w = GRID_MAX_W;
+    if (grid_h > GRID_MAX_H) grid_h = GRID_MAX_H;
+
     terminal_clear();
     
     // Init game state
     snake_len = 3;
-    snake[0].x = 40; snake[0].y = 12;
-    snake[1].x = 39; snake[1].y = 12;
-    snake[2].x = 38; snake[2].y = 12;
+    snake[0].x = grid_w / 2;     snake[0].y = grid_h / 2;
+    snake[1].x = grid_w / 2 - 1; snake[1].y = grid_h / 2;
+    snake[2].x = grid_w / 2 - 2; snake[2].y = grid_h / 2;
     dir_x = 1; dir_y = 0;
     score = 0;
     next = (unsigned long)timer_get_ticks(); // Seed
     spawn_fruit();
 
+    // Colors (ARGB)
+    uint32_t col_wall = 0xFF555555;
+    uint32_t col_bg   = 0xFF000000;
+    uint32_t col_head = 0xFF00FF00;
+    uint32_t col_body = 0xFF00AA00;
+    uint32_t col_fruit= 0xFFFF5555;
+
+    // Clear Screen with black
+    graphics_fill_rect(0, 0, graphics_get_width(), graphics_get_height(), col_bg);
+
     // Draw Border
-    for (int x = 0; x < SCREEN_W; x++) {
-        draw_point(x, 0, '#', 0x08, 0x00);
-        draw_point(x, SCREEN_H-1, '#', 0x08, 0x00);
+    for (int x = 0; x < grid_w; x++) {
+        draw_block(x, 0, col_wall);
+        draw_block(x, grid_h-1, col_wall);
     }
-    for (int y = 0; y < SCREEN_H; y++) {
-        draw_point(0, y, '#', 0x08, 0x00);
-        draw_point(SCREEN_W-1, y, '#', 0x08, 0x00);
+    for (int y = 0; y < grid_h; y++) {
+        draw_block(0, y, col_wall);
+        draw_block(grid_w-1, y, col_wall);
     }
 
     // Intro Sound
@@ -97,8 +113,8 @@ void snake_game_run(void) {
         Point next_head = { snake[0].x + dir_x, snake[0].y + dir_y };
 
         // Wall Collision
-        if (next_head.x <= 0 || next_head.x >= SCREEN_W - 1 ||
-            next_head.y <= 0 || next_head.y >= SCREEN_H - 1) {
+        if (next_head.x <= 0 || next_head.x >= grid_w - 1 ||
+            next_head.y <= 0 || next_head.y >= grid_h - 1) {
             running = false;
             sound_beep(100, 50); // Crash sound
             continue;
@@ -116,7 +132,7 @@ void snake_game_run(void) {
 
         // Move Snake
         // Erase tail
-        draw_point(snake[snake_len-1].x, snake[snake_len-1].y, ' ', 0x07, 0x00);
+        draw_block(snake[snake_len-1].x, snake[snake_len-1].y, col_bg);
 
         for (int i = snake_len - 1; i > 0; i--) {
             snake[i] = snake[i-1];
@@ -134,20 +150,16 @@ void snake_game_run(void) {
         }
 
         // Draw
-        // Head
-        draw_point(snake[0].x, snake[0].y, 'O', 0x0A, 0x00); // Green Head
-        // Body (just overwrite the neck)
-        draw_point(snake[1].x, snake[1].y, 'o', 0x02, 0x00); // Darker body
-        
-        // Fruit
-        draw_point(fruit.x, fruit.y, '@', 0x0C, 0x00); // Red fruit
+        draw_block(snake[0].x, snake[0].y, col_head);
+        draw_block(snake[1].x, snake[1].y, col_body);
+        draw_block(fruit.x, fruit.y, col_fruit);
 
         // 3. Delay (Game Speed)
-        timer_wait(5); // 5 ticks = 50ms approx
+        timer_wait(5);
     }
 
-    // Game Over Screen
-    terminal_set_theme(0x0F, 0x00);
+    // Game Over Screen - Return to terminal
+    terminal_set_theme(0x0F, 0x01);
     terminal_clear();
     terminal_writestring("\n\n   GAME OVER\n");
     terminal_writestring("   Score: ");
@@ -159,7 +171,5 @@ void snake_game_run(void) {
     // Wait for key
     while(!keyboard_poll_char());
     
-    // Restore terminal
-    terminal_set_theme(0x0F, 0x01); // Restore blue background
     terminal_clear();
 }
