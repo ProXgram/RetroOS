@@ -76,4 +76,3 @@ clean:
 
 run: check-conflicts $(OS_IMAGE)
 	$(QEMU) $(if $(HEADLESS),-display none -serial mon:stdio,) -drive format=raw,file=$(OS_IMAGE)
-	qemu-system-x86_64 -display none -serial mon:stdio -drive format=raw,file=$(OS_IMAGE)
