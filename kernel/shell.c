@@ -45,7 +45,7 @@ static const struct shell_command COMMANDS[] = {
     {"help", command_help, "Show this help message"},
     {"about", command_about, "Learn more about " OS_NAME},
     {"clear", command_clear, "Clear the screen"},
-    {"color", command_color, "Update text colors (e.g. 'color 14 1', 'color yellow')"},
+    {"color", command_color, "Update theme (Usage: color <fg> [bg])"},
     {"ls", command_ls, "List files in the virtual FS"},
     {"cat", command_cat, "Print a file from the virtual FS"},
     {"touch", command_touch, "Create an empty file"},
@@ -53,7 +53,7 @@ static const struct shell_command COMMANDS[] = {
     {"append", command_append, "Append text to a file"},
     {"rm", command_rm, "Remove a file"},
     {"history", command_history, "Show recent commands"},
-    {"palette", command_palette, "Display VGA colors or set them (e.g. 'palette cyan')"},
+    {"palette", command_palette, "Display VGA colors or set theme"},
     {"sysinfo", command_sysinfo, "Display hardware and memory info"},
     {"memtest", command_memtest, "Run system memory diagnostics"},
     {"logs", command_logs, "Show the latest system logs"},
@@ -150,27 +150,28 @@ static void apply_color_command(const char* args) {
     }
 
     // Parse optional second arg (BG)
-    parse_color_arg(&cursor, &bg);
+    if (!parse_color_arg(&cursor, &bg)) {
+        /*
+         * If the user provides only one color (foreground), default the background
+         * to Black (0). This ensures the text is readable and changes the "theme"
+         * decisively, avoiding accidental low-contrast situations (like Green on Blue).
+         */
+        bg = 0;
+    }
 
-    uint8_t current_fg, current_bg;
-    terminal_getcolors(&current_fg, &current_bg);
-
-    if (bg == -1) {
-        bg = current_bg;
+    if (fg == bg) {
+        terminal_writestring("Error: Foreground and background colors cannot be the same.\n");
+        return;
     }
 
     // Use terminal_set_theme to update the entire screen immediately
     terminal_set_theme((uint8_t)fg, (uint8_t)bg);
     
-    terminal_writestring("Color set to FG: ");
+    terminal_writestring("Theme updated: FG=");
     terminal_writestring(COLOR_NAMES[fg]);
-    terminal_writestring(" (");
-    terminal_write_uint(fg);
-    terminal_writestring("), BG: ");
+    terminal_writestring(", BG=");
     terminal_writestring(COLOR_NAMES[bg]);
-    terminal_writestring(" (");
-    terminal_write_uint(bg);
-    terminal_writestring(")\n");
+    terminal_newline();
 }
 
 static void shell_print_banner(void) {
