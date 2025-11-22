@@ -6,6 +6,7 @@
 #include "syslog.h"
 #include "io.h"
 #include "keyboard.h"
+#include "timer.h"
 
 struct interrupt_frame {
     uint64_t rip;
@@ -94,13 +95,13 @@ static void pic_remap_and_mask(void) {
 
     /* 
      * Masking:
-     * Master: 0xFD = 1111 1101 (Unmasks IRQ1 - Keyboard)
+     * Master: 0xFC = 1111 1100 (Unmasks IRQ0 - Timer, IRQ1 - Keyboard)
      * Slave:  0xFF = 1111 1111 (Masks all)
      */
-    outb(PIC1_DATA, 0xFD);
+    outb(PIC1_DATA, 0xFC); // <--- CHANGED from FD to FC
     outb(PIC2_DATA, 0xFF);
 
-    syslog_write("PIC remapped (0x20/0x28) and IRQ1 unmasked");
+    syslog_write("PIC remapped (0x20/0x28). Unmasked: Timer, Keyboard");
 }
 
 void interrupts_enable_irq(uint8_t irq) {
@@ -265,6 +266,13 @@ __attribute__((interrupt)) static void handler_irq_keyboard(struct interrupt_fra
     keyboard_push_byte(scancode);
 }
 
+// <--- NEW TIMER HANDLER
+__attribute__((interrupt)) static void handler_irq_timer(struct interrupt_frame* frame) {
+    (void)frame;
+    timer_handler();
+    outb(PIC1_COMMAND, PIC_EOI);
+}
+
 static void idt_set_gate(uint8_t vector, void* handler) {
     uint64_t address = (uint64_t)handler;
     g_idt[vector].offset_low = (uint16_t)(address & 0xFFFF);
@@ -331,6 +339,9 @@ void interrupts_init(void) {
     for (uint8_t vector = 0x28; vector < 0x30; vector++) {
         idt_set_gate(vector, handler_irq_slave);
     }
+
+    /* Override Timer IRQ0 (0x20) */
+    idt_set_gate(0x20, handler_irq_timer); // <--- ADD THIS
 
     /* Override keyboard IRQ1 (0x21) */
     idt_set_gate(0x21, handler_irq_keyboard);
