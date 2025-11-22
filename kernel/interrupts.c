@@ -7,6 +7,7 @@
 #include "io.h"
 #include "keyboard.h"
 #include "timer.h"
+#include "graphics.h" // Updated for GUI Panic
 
 struct interrupt_frame {
     uint64_t rip;
@@ -69,36 +70,27 @@ static void halt_on_invalid(const char* message) {
 }
 
 static void pic_remap_and_mask(void) {
-    /* Start initialization */
     outb(PIC1_COMMAND, 0x11);
     io_wait();
     outb(PIC2_COMMAND, 0x11);
     io_wait();
 
-    /* Remap to 0x20-0x2F */
     outb(PIC1_DATA, 0x20);
     io_wait();
     outb(PIC2_DATA, 0x28);
     io_wait();
 
-    /* Cascade setup */
     outb(PIC1_DATA, 0x04);
     io_wait();
     outb(PIC2_DATA, 0x02);
     io_wait();
 
-    /* 8086 mode */
     outb(PIC1_DATA, 0x01);
     io_wait();
     outb(PIC2_DATA, 0x01);
     io_wait();
 
-    /* 
-     * Masking:
-     * Master: 0xFC = 1111 1100 (Unmasks IRQ0 - Timer, IRQ1 - Keyboard)
-     * Slave:  0xFF = 1111 1111 (Masks all)
-     */
-    outb(PIC1_DATA, 0xFC); // <--- CHANGED from FD to FC
+    outb(PIC1_DATA, 0xFC);
     outb(PIC2_DATA, 0xFF);
 
     syslog_write("PIC remapped (0x20/0x28). Unmasked: Timer, Keyboard");
@@ -127,35 +119,27 @@ static const char* const EXCEPTION_NAMES[] = {
     "Machine Check", "SIMD FPU", "Virtualization", "Control Prot"
 };
 
-#define VGA_COLUMNS 80
-#define VGA_ROWS 25
-#define PANIC_COLOR 0x4F
+// Panic Drawing State
+static size_t panic_line = 0;
 
-static size_t panic_row;
-
-static void panic_clear_screen(void) {
-    volatile uint16_t* vga = (volatile uint16_t*)0xB8000;
-    const uint16_t entry = ((uint16_t)PANIC_COLOR << 8) | ' ';
-    for (size_t i = 0; i < VGA_COLUMNS * VGA_ROWS; i++) {
-        vga[i] = entry;
+static void panic_draw_bg(void) {
+    if (graphics_get_width() > 0) {
+        // Fill Blue (0xFF0000AA)
+        graphics_fill_rect(0, 0, graphics_get_width(), graphics_get_height(), 0xFF0000AA);
     }
-    panic_row = 0;
+    panic_line = 0;
 }
 
 static void panic_write_line(const char* text) {
-    volatile uint16_t* vga = (volatile uint16_t*)0xB8000;
-    if (panic_row >= VGA_ROWS) {
-        panic_row = VGA_ROWS - 1;
+    if (graphics_get_width() == 0) return; // Cannot draw if graphics not init
+    
+    int x = 10;
+    int y = 10 + (panic_line * 10); // 10px padding + 8px font + 2px spacing
+    
+    for (int i = 0; text[i] != '\0'; i++) {
+        graphics_draw_char(x + (i * 8), y, text[i], 0xFFFFFFFF, 0xFF0000AA);
     }
-    size_t column = 0;
-    while (text[column] != '\0' && column < VGA_COLUMNS) {
-        vga[panic_row * VGA_COLUMNS + column] = ((uint16_t)PANIC_COLOR << 8) | (uint8_t)text[column];
-        column++;
-    }
-    for (; column < VGA_COLUMNS; column++) {
-        vga[panic_row * VGA_COLUMNS + column] = ((uint16_t)PANIC_COLOR << 8) | ' ';
-    }
-    panic_row++;
+    panic_line++;
 }
 
 static void panic_write_hex_line(const char* label, uint64_t value) {
@@ -180,23 +164,31 @@ static void panic_write_vector_line(uint8_t vector) {
 }
 
 static void exception_panic(uint8_t vector, uint64_t error_code, bool has_error_code, const struct interrupt_frame* frame) {
-    panic_clear_screen();
-    panic_write_line("!!! CPU EXCEPTION !!!");
+    // Ensure interrupts are disabled
+    __asm__ volatile("cli");
+    
+    panic_draw_bg();
+    panic_write_line("!!! SYSTEM PANIC (GUI MODE) !!!");
     panic_write_vector_line(vector);
+    
     if (vector < sizeof(EXCEPTION_NAMES)/sizeof(char*)) {
         panic_write_line(EXCEPTION_NAMES[vector]);
     }
+    
     if (has_error_code) {
         panic_write_hex_line("Error code: ", error_code);
     }
+    
     if (frame != NULL) {
         panic_write_hex_line("RIP: ", frame->rip);
         panic_write_hex_line("CS: ", frame->cs);
         panic_write_hex_line("RFLAGS: ", frame->rflags);
         panic_write_hex_line("RSP: ", frame->rsp);
     }
+    
     panic_write_line("System halted.");
-    for (;;) __asm__ volatile("cli; hlt");
+    
+    for (;;) __asm__ volatile("hlt");
 }
 
 #define DECLARE_NOERR_HANDLER(num) \
@@ -258,15 +250,10 @@ __attribute__((interrupt)) static void handler_irq_slave(struct interrupt_frame*
 __attribute__((interrupt)) static void handler_irq_keyboard(struct interrupt_frame* frame) {
     (void)frame;
     uint8_t scancode = inb(0x60);
-    
-    /* Acknowledge interrupt immediately to Master PIC */
     outb(PIC1_COMMAND, PIC_EOI);
-    
-    /* Push to driver buffer */
     keyboard_push_byte(scancode);
 }
 
-// <--- NEW TIMER HANDLER
 __attribute__((interrupt)) static void handler_irq_timer(struct interrupt_frame* frame) {
     (void)frame;
     timer_handler();
@@ -340,10 +327,7 @@ void interrupts_init(void) {
         idt_set_gate(vector, handler_irq_slave);
     }
 
-    /* Override Timer IRQ0 (0x20) */
-    idt_set_gate(0x20, handler_irq_timer); // <--- ADD THIS
-
-    /* Override keyboard IRQ1 (0x21) */
+    idt_set_gate(0x20, handler_irq_timer);
     idt_set_gate(0x21, handler_irq_keyboard);
 
     const struct idt_descriptor descriptor = {
