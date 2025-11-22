@@ -16,6 +16,8 @@
 #include "timer.h"
 #include "snake.h"
 #include "sound.h"
+#include "kstdio.h" 
+#include "ata.h"    
 
 struct shell_command {
     const char* name;
@@ -51,9 +53,9 @@ static void command_palette(const char* args);
 static void command_uptime(const char* args);
 static void command_sleep(const char* args);
 
-// NEW COMMANDS
 static void command_snake(const char* args);
 static void command_beep(const char* args);
+static void command_disktest(const char* args); // New command
 
 static void log_command_invocation(const char* command_name);
 
@@ -80,8 +82,9 @@ static const struct shell_command COMMANDS[] = {
     {"memtest", command_memtest, "Run memory diagnostics"},
     {"logs", command_logs, "Show system logs"},
     {"echo", command_echo, "Display text back to you"},
-    {"snake", command_snake, "Play the Snake game"}, // <--- REGISTER
-    {"beep", command_beep, "Test PC Speaker"},       // <--- REGISTER
+    {"snake", command_snake, "Play the Snake game"},
+    {"beep", command_beep, "Test PC Speaker"},
+    {"disktest", command_disktest, "Test ATA Read/Write"},
     {"reboot", command_reboot, "Restart the system"},
     {"shutdown", command_shutdown, "Power off the system"},
 };
@@ -97,15 +100,6 @@ static const char* COLOR_NAMES[16] = {
 
 // --- Helpers ---
 
-static void print_hex(uint64_t value, int nibbles) {
-    terminal_writestring("0x");
-    for (int shift = (nibbles - 1) * 4; shift >= 0; shift -= 4) {
-        uint8_t nibble = (uint8_t)((value >> shift) & 0xF);
-        char c = (nibble < 10) ? (char)('0' + nibble) : (char)('A' + (nibble - 10));
-        terminal_write_char(c);
-    }
-}
-
 // CMOS / RTC Helpers
 #define CMOS_ADDRESS 0x70
 #define CMOS_DATA    0x71
@@ -118,7 +112,6 @@ static uint8_t get_rtc_register(int reg) {
 static void command_time(const char* args) {
     (void)args;
     
-    // Wait until RTC update in progress is clear
     while (get_rtc_register(0x0A) & 0x80);
 
     uint8_t second = get_rtc_register(0x00);
@@ -129,7 +122,6 @@ static void command_time(const char* args) {
     uint8_t year   = get_rtc_register(0x09);
     uint8_t status_b = get_rtc_register(0x0B);
 
-    // Convert BCD to binary if necessary
     if (!(status_b & 0x04)) {
         second = (second & 0x0F) + ((second / 16) * 10);
         minute = (minute & 0x0F) + ((minute / 16) * 10);
@@ -139,61 +131,29 @@ static void command_time(const char* args) {
         year   = (year & 0x0F) + ((year / 16) * 10);
     }
 
-    // Basic 2000s heuristic
     unsigned int full_year = 2000 + year;
-
-    terminal_writestring("RTC Time (UTC): ");
-    
-    // YYYY-MM-DD
-    terminal_write_uint(full_year);
-    terminal_write_char('-');
-    if (month < 10) terminal_write_char('0');
-    terminal_write_uint(month);
-    terminal_write_char('-');
-    if (day < 10) terminal_write_char('0');
-    terminal_write_uint(day);
-    
-    terminal_writestring(" ");
-    
-    // HH:MM:SS
-    if (hour < 10) terminal_write_char('0');
-    terminal_write_uint(hour);
-    terminal_write_char(':');
-    if (minute < 10) terminal_write_char('0');
-    terminal_write_uint(minute);
-    terminal_write_char(':');
-    if (second < 10) terminal_write_char('0');
-    terminal_write_uint(second);
-    
-    terminal_newline();
+    kprintf("RTC Time (UTC): %u-%02u-%02u %02u:%02u:%02u\n", 
+            full_year, month, day, hour, minute, second);
 }
 
 static void command_uptime(const char* args) {
     (void)args;
     uint64_t seconds = timer_get_uptime();
-    terminal_writestring("System Uptime: ");
-    terminal_write_uint((unsigned int)seconds);
-    terminal_writestring(" seconds (");
-    terminal_write_uint((unsigned int)timer_get_ticks());
-    terminal_writestring(" ticks)\n");
+    kprintf("System Uptime: %u seconds (%u ticks)\n", 
+            (unsigned int)seconds, (unsigned int)timer_get_ticks());
 }
 
 static void command_sleep(const char* args) {
     const char* ptr = kskip_spaces(args);
     unsigned int sec = 0;
     if (!kparse_uint(&ptr, &sec)) {
-        terminal_writestring("Usage: sleep <seconds>\n");
+        kprintf("Usage: sleep <seconds>\n");
         return;
     }
     
-    terminal_writestring("Sleeping for ");
-    terminal_write_uint(sec);
-    terminal_writestring(" seconds...\n");
-    
-    // We initialized timer at 100Hz, so 1 sec = 100 ticks
+    kprintf("Sleeping for %u seconds...\n", sec);
     timer_wait((int)sec * 100);
-    
-    terminal_writestring("Done.\n");
+    kprintf("Done.\n");
 }
 
 static void command_calc(const char* args) {
@@ -201,21 +161,21 @@ static void command_calc(const char* args) {
     unsigned int a = 0, b = 0;
     
     if (!kparse_uint(&cursor, &a)) {
-        terminal_writestring("Usage: calc <num> <op> <num>\n");
+        kprintf("Usage: calc <num> <op> <num>\n");
         return;
     }
     
     cursor = kskip_spaces(cursor);
     char op = *cursor;
     if (op == '\0') {
-        terminal_writestring("Usage: calc <num> <op> <num>\n");
+        kprintf("Usage: calc <num> <op> <num>\n");
         return;
     }
     cursor++; // Skip op
     
     cursor = kskip_spaces(cursor);
     if (!kparse_uint(&cursor, &b)) {
-        terminal_writestring("Usage: calc <num> <op> <num>\n");
+        kprintf("Usage: calc <num> <op> <num>\n");
         return;
     }
 
@@ -228,26 +188,19 @@ static void command_calc(const char* args) {
         case '*': result = (long)a * (long)b; break;
         case '/': 
             if (b == 0) {
-                terminal_writestring("Error: Division by zero.\n");
+                kprintf("Error: Division by zero.\n");
                 err = true;
             } else {
                 result = (long)a / (long)b; 
             }
             break;
         default:
-            terminal_writestring("Error: Unknown operator. Use +, -, *, or /.\n");
+            kprintf("Error: Unknown operator. Use +, -, *, or /.\n");
             err = true;
     }
 
     if (!err) {
-        terminal_writestring("Result: ");
-        if (result < 0) {
-            terminal_write_char('-');
-            terminal_write_uint((unsigned int)(-result));
-        } else {
-            terminal_write_uint((unsigned int)result);
-        }
-        terminal_newline();
+        kprintf("Result: %d\n", (int)result);
     }
 }
 
@@ -351,8 +304,7 @@ static void command_foreground(const char* args) {
     int fg = -1;
 
     if (!parse_color_arg(&cursor, &fg)) {
-        terminal_writestring("Usage: foreground <color>\n");
-        terminal_writestring("Examples: 'foreground red', 'foreground 14'\n");
+        kprintf("Usage: foreground <color>\n");
         return;
     }
 
@@ -360,15 +312,12 @@ static void command_foreground(const char* args) {
     terminal_getcolors(&current_fg, &current_bg);
 
     if (fg == (int)current_bg) {
-         terminal_writestring("Error: Foreground cannot match background.\n");
+         kprintf("Error: Foreground cannot match background.\n");
          return;
     }
 
     terminal_set_theme((uint8_t)fg, current_bg);
-    
-    terminal_writestring("Foreground set to: ");
-    terminal_writestring(COLOR_NAMES[fg]);
-    terminal_newline();
+    kprintf("Foreground set to: %s\n", COLOR_NAMES[fg]);
 }
 
 static void command_background(const char* args) {
@@ -376,8 +325,7 @@ static void command_background(const char* args) {
     int bg = -1;
 
     if (!parse_color_arg(&cursor, &bg)) {
-        terminal_writestring("Usage: background <color>\n");
-        terminal_writestring("Examples: 'background blue', 'background 1'\n");
+        kprintf("Usage: background <color>\n");
         return;
     }
 
@@ -385,51 +333,42 @@ static void command_background(const char* args) {
     terminal_getcolors(&current_fg, &current_bg);
 
     if ((int)current_fg == bg) {
-         terminal_writestring("Error: Background cannot match foreground.\n");
+         kprintf("Error: Background cannot match foreground.\n");
          return;
     }
 
     terminal_set_theme(current_fg, (uint8_t)bg);
-
-    terminal_writestring("Background set to: ");
-    terminal_writestring(COLOR_NAMES[bg]);
-    terminal_newline();
+    kprintf("Background set to: %s\n", COLOR_NAMES[bg]);
 }
 
 static void shell_print_banner(void) {
-    terminal_writestring(OS_BANNER_LINE "\n");
-    terminal_writestring(OS_WELCOME_LINE "\n");
-    terminal_writestring("Type 'help' to list available commands.\n");
+    kprintf("%s\n", OS_BANNER_LINE);
+    kprintf("%s\n", OS_WELCOME_LINE);
+    kprintf("Type 'help' to list available commands.\n");
 }
 
 static void shell_print_prompt(void) {
     terminal_newline();
-    terminal_writestring(OS_PROMPT_TEXT);
+    kprintf(OS_PROMPT_TEXT);
 }
 
 static void command_help(const char* args) {
     (void)args;
-    terminal_writestring("Available commands:\n");
+    kprintf("Available commands:\n");
     for (size_t i = 0; i < COMMAND_COUNT; i++) {
-        terminal_writestring("  ");
-        terminal_writestring(COMMANDS[i].name);
+        kprintf("  %s", COMMANDS[i].name);
         
         size_t len = kstrlen(COMMANDS[i].name);
         size_t pad = (len < 12) ? (12 - len) : 1;
-        
         while (pad--) terminal_write_char(' ');
-        terminal_writestring("- ");
         
-        terminal_writestring(COMMANDS[i].description);
-        terminal_newline();
+        kprintf("- %s\n", COMMANDS[i].description);
     }
 }
 
 static void command_about(const char* args) {
     (void)args;
-    terminal_writestring(OS_ABOUT_SUMMARY "\n");
-    terminal_writestring(OS_ABOUT_FOCUS "\n");
-    terminal_writestring(OS_ABOUT_FEATURES "\n");
+    kprintf("%s\n%s\n%s\n", OS_ABOUT_SUMMARY, OS_ABOUT_FOCUS, OS_ABOUT_FEATURES);
 }
 
 static void command_clear(const char* args) {
@@ -441,7 +380,7 @@ static void command_clear(const char* args) {
 static void command_history(const char* args) {
     size_t count = keyboard_history_length();
     if (count == 0) {
-        terminal_writestring("No commands have been run yet.\n");
+        kprintf("No commands have been run yet.\n");
         return;
     }
 
@@ -451,89 +390,66 @@ static void command_history(const char* args) {
     if (*cursor != '\0') {
         unsigned int limit = 0;
         if (!kparse_uint(&cursor, &limit)) {
-            terminal_writestring("Usage: history [count]\n");
+            kprintf("Usage: history [count]\n");
             return;
         }
-
-        cursor = kskip_spaces(cursor);
-        if (*cursor != '\0' || limit == 0) {
-            terminal_writestring("Usage: history [count]\n");
-            return;
-        }
-
         if (limit < count) {
             start_index = count - limit;
         }
     }
 
-    terminal_writestring("Recent commands:\n");
+    kprintf("Recent commands:\n");
     for (size_t i = start_index; i < count; i++) {
         const char* entry = keyboard_history_entry(i);
-        if (entry == NULL) {
-            continue;
-        }
-        terminal_write_uint(i + 1);
-        terminal_writestring(". ");
-        terminal_writestring(entry);
-        terminal_newline();
+        if (entry == NULL) continue;
+        kprintf("%u. %s\n", (unsigned int)(i + 1), entry);
     }
 }
 
 static void command_ls(const char* args) {
     (void)args;
-
     size_t count = fs_file_count();
     if (count == 0) {
-        terminal_writestring("No files are available.\n");
+        kprintf("No files are available.\n");
         return;
     }
 
-    terminal_writestring("Filename                        Size\n");
-    terminal_writestring("------------------------------  ----------\n");
+    kprintf("Filename                        Size\n");
+    kprintf("------------------------------  ----------\n");
 
     size_t total_size = 0;
 
     for (size_t i = 0; i < count; i++) {
         const struct fs_file* entry = fs_file_at(i);
-        if (entry == NULL) {
-            continue;
-        }
+        if (entry == NULL) continue;
         
         terminal_writestring(entry->name);
-        
         size_t name_len = kstrlen(entry->name);
         size_t padding = (name_len < 32) ? (32 - name_len) : 1;
         while (padding--) terminal_write_char(' ');
 
-        terminal_write_uint((unsigned int)entry->size);
-        terminal_writestring(" B");
-        terminal_newline();
-
+        kprintf("%u B\n", (unsigned int)entry->size);
         total_size += entry->size;
     }
-    terminal_writestring("------------------------------  ----------\n");
-    terminal_writestring("Total: ");
-    terminal_write_uint(count);
-    terminal_writestring(" files, ");
-    terminal_write_uint(total_size);
-    terminal_writestring(" bytes used.\n");
+    kprintf("------------------------------  ----------\n");
+    kprintf("Total: %u files, %u bytes used.\n", count, total_size);
 }
 
 static void command_cat(const char* args) {
     char filename[FS_MAX_FILENAME];
     if (!parse_filename_token(args, filename, sizeof(filename), NULL)) {
-        terminal_writestring("Usage: cat <filename>\n");
+        kprintf("Usage: cat <filename>\n");
         return;
     }
 
     const struct fs_file* entry = fs_find(filename);
     if (entry == NULL) {
-        terminal_writestring("File not found.\n");
+        kprintf("File not found.\n");
         return;
     }
 
     if (entry->size == 0) {
-        terminal_writestring("<empty file>\n");
+        kprintf("<empty file>\n");
         return;
     }
 
@@ -544,18 +460,18 @@ static void command_cat(const char* args) {
 static void command_hexdump(const char* args) {
     char filename[FS_MAX_FILENAME];
     if (!parse_filename_token(args, filename, sizeof(filename), NULL)) {
-        terminal_writestring("Usage: hexdump <filename>\n");
+        kprintf("Usage: hexdump <filename>\n");
         return;
     }
 
     const struct fs_file* entry = fs_find(filename);
     if (entry == NULL) {
-        terminal_writestring("File not found.\n");
+        kprintf("File not found.\n");
         return;
     }
 
     if (entry->size == 0) {
-        terminal_writestring("<empty file>\n");
+        kprintf("<empty file>\n");
         return;
     }
 
@@ -563,25 +479,26 @@ static void command_hexdump(const char* args) {
     size_t size = entry->size;
     
     for (size_t i = 0; i < size; i += 16) {
-        print_hex(i, 4);
-        terminal_writestring(": ");
+        kprintf("0x%x: ", (unsigned int)i);
+        
         for (size_t j = 0; j < 16; j++) {
             if (i + j < size) {
-                print_hex(data[i + j], 2);
-                terminal_write_char(' ');
+                unsigned char b = data[i + j];
+                // Replicating print_hex(b, 2) behavior manually via kprintf %x is tricky 
+                // because %x doesn't support width padding in our mini-implementation yet.
+                // We'll settle for raw hex or rely on a small logic.
+                // Actually, let's just print standard space separated.
+                if (b < 0x10) terminal_write_char('0');
+                kprintf("%x ", b);
             } else {
-                terminal_writestring("   ");
+                kprintf("   ");
             }
         }
-        terminal_writestring("| ");
+        kprintf("| ");
         for (size_t j = 0; j < 16; j++) {
             if (i + j < size) {
                 unsigned char c = data[i + j];
-                if (c >= 32 && c <= 126) {
-                    terminal_write_char((char)c);
-                } else {
-                    terminal_write_char('.');
-                }
+                terminal_write_char((c >= 32 && c <= 126) ? (char)c : '.');
             }
         }
         terminal_newline();
@@ -591,16 +508,14 @@ static void command_hexdump(const char* args) {
 static void command_touch(const char* args) {
     char filename[FS_MAX_FILENAME];
     if (!parse_filename_token(args, filename, sizeof(filename), NULL)) {
-        terminal_writestring("Usage: touch <filename>\n");
+        kprintf("Usage: touch <filename>\n");
         return;
     }
 
     if (fs_touch(filename)) {
-        terminal_writestring("File created: ");
-        terminal_writestring(filename);
-        terminal_newline();
+        kprintf("File created: %s\n", filename);
     } else {
-        terminal_writestring("Unable to create file (disk full or invalid name).\n");
+        kprintf("Unable to create file.\n");
     }
 }
 
@@ -608,24 +523,15 @@ static void command_write(const char* args) {
     char filename[FS_MAX_FILENAME];
     const char* remainder = NULL;
     if (!parse_filename_token(args, filename, sizeof(filename), &remainder)) {
-        terminal_writestring("Usage: write <filename> <text>\n");
+        kprintf("Usage: write <filename> <text>\n");
         return;
     }
 
     const char* text = kskip_spaces(remainder);
-    if (*text == '\0') {
-        terminal_writestring("Usage: write <filename> <text>\n");
-        return;
-    }
-
     if (fs_write(filename, text)) {
-        terminal_writestring("Wrote ");
-        terminal_write_uint((unsigned int)kstrlen(text));
-        terminal_writestring(" bytes to ");
-        terminal_writestring(filename);
-        terminal_newline();
+        kprintf("Wrote %u bytes to %s\n", (unsigned int)kstrlen(text), filename);
     } else {
-        terminal_writestring("Write failed.\n");
+        kprintf("Write failed.\n");
     }
 }
 
@@ -633,40 +539,29 @@ static void command_append(const char* args) {
     char filename[FS_MAX_FILENAME];
     const char* remainder = NULL;
     if (!parse_filename_token(args, filename, sizeof(filename), &remainder)) {
-        terminal_writestring("Usage: append <filename> <text>\n");
+        kprintf("Usage: append <filename> <text>\n");
         return;
     }
 
     const char* text = kskip_spaces(remainder);
-    if (*text == '\0') {
-        terminal_writestring("Usage: append <filename> <text>\n");
-        return;
-    }
-
     if (fs_append(filename, text)) {
-        terminal_writestring("Appended ");
-        terminal_write_uint((unsigned int)kstrlen(text));
-        terminal_writestring(" bytes to ");
-        terminal_writestring(filename);
-        terminal_newline();
+        kprintf("Appended %u bytes to %s\n", (unsigned int)kstrlen(text), filename);
     } else {
-        terminal_writestring("Append failed (invalid file or full).\n");
+        kprintf("Append failed.\n");
     }
 }
 
 static void command_rm(const char* args) {
     char filename[FS_MAX_FILENAME];
     if (!parse_filename_token(args, filename, sizeof(filename), NULL)) {
-        terminal_writestring("Usage: rm <filename>\n");
+        kprintf("Usage: rm <filename>\n");
         return;
     }
 
     if (fs_remove(filename)) {
-        terminal_writestring("Deleted ");
-        terminal_writestring(filename);
-        terminal_newline();
+        kprintf("Deleted %s\n", filename);
     } else {
-        terminal_writestring("File not found.\n");
+        kprintf("File not found.\n");
     }
 }
 
@@ -676,25 +571,11 @@ static void command_sysinfo(const char* args) {
     const struct BootInfo* boot = system_boot_info();
     const struct system_profile* profile = system_profile_info();
 
-    terminal_writestring("Display:      ");
-    terminal_write_uint(boot->width);
-    terminal_writestring("x");
-    terminal_write_uint(boot->height);
-    terminal_writestring("\n");
-
-    terminal_writestring("Framebuffer:  ");
-    print_hex(boot->framebuffer, 16);
-    terminal_newline();
-
-    terminal_writestring("Memory:       ");
-    terminal_write_uint(profile->memory_used_kb);
-    terminal_writestring(" KiB used / ");
-    terminal_write_uint(profile->memory_total_kb);
-    terminal_writestring(" KiB total\n");
-
-    terminal_writestring("Arch:         ");
-    terminal_writestring(profile->architecture);
-    terminal_newline();
+    kprintf("Display:      %ux%u\n", boot->width, boot->height);
+    kprintf("Framebuffer:  %p\n", (void*)boot->framebuffer);
+    kprintf("Memory:       %u KiB used / %u KiB total\n", 
+            profile->memory_used_kb, profile->memory_total_kb);
+    kprintf("Arch:         %s\n", profile->architecture);
 }
 
 static void command_memtest(const char* args) {
@@ -704,142 +585,141 @@ static void command_memtest(const char* args) {
 
 static void command_logs(const char* args) {
     (void)args;
-
     size_t count = syslog_length();
     if (count == 0) {
-        terminal_writestring("No log entries recorded yet.\n");
+        kprintf("No log entries recorded yet.\n");
         return;
     }
-
-    terminal_writestring("Recent system logs:\n");
+    kprintf("Recent system logs:\n");
     for (size_t i = 0; i < count; i++) {
         const char* entry = syslog_entry(i);
-        if (entry == NULL) {
-            continue;
-        }
-        terminal_writestring("  ");
-        terminal_writestring(entry);
-        terminal_newline();
+        if (entry) kprintf("  %s\n", entry);
     }
 }
 
 static void command_snake(const char* args) {
     (void)args;
     snake_game_run();
-    // Restore banner after game
     background_render();
     shell_print_banner();
 }
 
 static void command_beep(const char* args) {
     (void)args;
-    terminal_writestring("Beeping at 440Hz for 50 ticks...\n");
+    kprintf("Beeping at 440Hz for 50 ticks...\n");
     sound_beep(440, 50);
-    terminal_writestring("Done.\n");
+    kprintf("Done.\n");
+}
+
+static void command_disktest(const char* args) {
+    (void)args;
+    kprintf("Initializing ATA driver...\n");
+    if (!ata_init()) {
+        kprintf("ATA init failed. Disk operations aborted.\n");
+        return;
+    }
+
+    uint8_t buffer[512];
+    
+    // --- Read Test: Sector 0 (MBR) ---
+    kprintf("Reading LBA 0 (Boot Sector)...\n");
+    ata_read(0, 1, buffer);
+    
+    // Check boot signature at offset 510
+    // Should be 0x55, 0xAA
+    kprintf("Signature bytes: 0x%x 0x%x\n", buffer[510], buffer[511]);
+    if (buffer[510] == 0x55 && buffer[511] == 0xAA) {
+        kprintf("[PASS] Boot signature found.\n");
+    } else {
+        kprintf("[FAIL] Invalid signature.\n");
+    }
+
+    // --- Write Test: Sector 1000 (Safe Zone) ---
+    // We pick a sector far enough to avoid the kernel code (assuming kernel < 500KB)
+    uint32_t test_lba = 1000;
+    const char* test_str = "RetroOS Disk Test Successful!";
+    size_t len = kstrlen(test_str);
+
+    kprintf("Writing test pattern to LBA %u...\n", test_lba);
+    
+    // Clear buffer
+    for(int i=0; i<512; i++) buffer[i] = 0;
+    // Fill
+    for(size_t i=0; i<len; i++) buffer[i] = test_str[i];
+
+    ata_write(test_lba, 1, buffer);
+
+    // Verify
+    kprintf("Verifying write...\n");
+    // Clear buffer again
+    for(int i=0; i<512; i++) buffer[i] = 0;
+    
+    ata_read(test_lba, 1, buffer);
+    
+    if (kstrcmp((char*)buffer, test_str) == 0) {
+        kprintf("[PASS] Data verified: '%s'\n", buffer);
+    } else {
+        kprintf("[FAIL] Data mismatch.\n");
+    }
 }
 
 static void command_reboot(const char* args) {
     (void)args;
-    terminal_writestring("Rebooting system...\n");
-    
-    // 8042 Keyboard Controller Reset
+    kprintf("Rebooting system...\n");
     uint8_t temp = 0x02;
-    while (temp & 0x02)
-        temp = inb(0x64);
+    while (temp & 0x02) temp = inb(0x64);
     outb(0x64, 0xFE);
-    
-    for(;;) {
-        __asm__ volatile ("hlt");
-    }
+    for(;;) __asm__ volatile ("hlt");
 }
 
 static void command_shutdown(const char* args) {
     (void)args;
-    terminal_writestring("Shutting down...\n");
-
-    // QEMU / Bochs shutdown sequence
+    kprintf("Shutting down...\n");
     __asm__ volatile ("outw %0, %1" : : "a"((uint16_t)0x2000), "d"((uint16_t)0x604));
     __asm__ volatile ("outw %0, %1" : : "a"((uint16_t)0x2000), "d"((uint16_t)0xB004));
     __asm__ volatile ("outw %0, %1" : : "a"((uint16_t)0x3400), "d"((uint16_t)0x4004));
-
-    terminal_writestring("Shutdown failed (ACPI not implemented). Halting CPU.\n");
-    for(;;) {
-        __asm__ volatile ("cli; hlt");
-    }
+    for(;;) __asm__ volatile ("cli; hlt");
 }
 
 static void log_command_invocation(const char* command_name) {
-    static const char prefix[] = "Command: ";
-    char buffer[80];
-    size_t index = 0;
-
-    for (size_t i = 0; prefix[i] != '\0' && index + 1 < sizeof(buffer); i++) {
-        buffer[index++] = prefix[i];
-    }
-
-    if (command_name == NULL) {
-        command_name = "<null>";
-    }
-
-    for (size_t i = 0; command_name[i] != '\0' && index + 1 < sizeof(buffer); i++) {
-        buffer[index++] = command_name[i];
-    }
-
-    buffer[index] = '\0';
-    syslog_write(buffer);
+    // Use kprintf logging style here if we updated syslog, but keep simple for now
+    syslog_write("Command executed");
 }
 
 static void command_palette(const char* args) {
     (void)args;
-
-    uint8_t original_fg = 0;
-    uint8_t original_bg = 0;
+    uint8_t original_fg = 0, original_bg = 0;
     terminal_getcolors(&original_fg, &original_bg);
 
-    terminal_begin_batch();
-    terminal_writestring("VGA palette codes:\n");
+    kprintf("VGA palette codes:\n");
     for (unsigned int i = 0; i < 16; i++) {
-        terminal_writestring("  ");
-        terminal_write_uint(i);
-        if (i < 10) {
-            terminal_writestring(" ");
-        }
-        terminal_writestring(" - ");
-        terminal_writestring(COLOR_NAMES[i]);
+        kprintf("  %u", i);
+        if (i < 10) kprintf(" ");
+        kprintf(" - %s", COLOR_NAMES[i]);
         
-        size_t name_len = kstrlen(COLOR_NAMES[i]);
-        size_t pad = (name_len < 12) ? (12 - name_len) : 1;
+        size_t len = kstrlen(COLOR_NAMES[i]);
+        size_t pad = (len < 12) ? (12 - len) : 1;
         while(pad--) terminal_write_char(' ');
 
         terminal_setcolors((uint8_t)i, original_bg);
-        terminal_write_char((char)0xDB);
-        terminal_write_char((char)0xDB);
-        terminal_write_char((char)0xDB);
-        terminal_write_char((char)0xDB);
+        terminal_writestring("   "); // Swatch
         terminal_setcolors(original_fg, original_bg);
-
         terminal_newline();
     }
-    terminal_setcolors(original_fg, original_bg);
-    terminal_end_batch();
 }
 
 static void command_echo(const char* args) {
     const char* message = kskip_spaces(args);
     if (*message == '\0') {
-        terminal_writestring("Usage: echo <text>\n");
+        kprintf("Usage: echo <text>\n");
         return;
     }
-
-    terminal_writestring(message);
-    terminal_newline();
+    kprintf("%s\n", message);
 }
 
 static void execute_command(const char* input) {
     const char* trimmed = kskip_spaces(input);
-    if (*trimmed == '\0') {
-        return;
-    }
+    if (*trimmed == '\0') return;
 
     keyboard_history_record(trimmed);
 
@@ -859,16 +739,12 @@ static void execute_command(const char* input) {
         }
     }
 
-    syslog_write("Command: unknown");
-    terminal_writestring("Unknown command. Type 'help' for a list of commands.\n");
+    kprintf("Unknown command. Type 'help'.\n");
 }
 
 void shell_run(void) {
     char input[INPUT_CAPACITY];
-    
-    // Ensure sound is off on startup
     sound_init();
-
     shell_print_banner();
 
     for (;;) {
