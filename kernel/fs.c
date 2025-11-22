@@ -311,25 +311,19 @@ bool fs_remove(const char* name) {
 
 static void fs_self_test(void) {
     const char* scratch = "__fs_self_test__";
-    const char* oversize = "__fs_oversize__";
-    bool ok = true;
-
-    // We temporarily disable sync for self test to avoid thrashing disk, 
-    // OR we accept it. Here we just run standard logic.
-    // Note: This will write to disk multiple times.
     
-    // ... (logic mostly same as before, but calls wrappers that sync) ...
-    // We can skip complex logic for now to save space, or keep it.
-    // I'll keep the simple check logic but strip the calls that might fail due to persistence logic complexity
-    
-    struct fs_file* f = fs_find_mutable(scratch);
-    if (f) fs_clear(f);
-    
-    // Since we added persistence, the old self-test might actually persist test files!
-    // We should remove them at the end.
-    
-    fs_touch(scratch);
+    // Clean slate for the test file
     fs_remove(scratch);
+    
+    if (!fs_touch(scratch)) {
+        syslog_write("FS: self-test (touch) failed");
+        return;
+    }
+    
+    if (!fs_remove(scratch)) {
+        syslog_write("FS: self-test (remove) failed");
+        return;
+    }
     
     syslog_write("FS: self-test sequence complete");
 }
