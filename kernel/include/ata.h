@@ -12,13 +12,14 @@ bool ata_init(void);
 
 /*
  * Reads 'count' sectors starting at LBA 'lba' into 'buffer'.
- * Buffer must be large enough (count * 512 bytes).
+ * Returns true on success, false on timeout/error.
  */
-void ata_read(uint32_t lba, uint8_t count, uint8_t* buffer);
+bool ata_read(uint32_t lba, uint8_t count, uint8_t* buffer);
 
 /*
  * Writes 'count' sectors starting at LBA 'lba' from 'buffer'.
+ * Returns true on success, false on timeout/error.
  */
-void ata_write(uint32_t lba, uint8_t count, const uint8_t* buffer);
+bool ata_write(uint32_t lba, uint8_t count, const uint8_t* buffer);
 
 #endif /* ATA_H */
