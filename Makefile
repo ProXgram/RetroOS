@@ -47,15 +47,14 @@ $(KERNEL_ELF): kernel/entry.asm $(KERNEL_OBJS) kernel/linker.ld | $(BUILD_DIR)
 	$(LD) -nostdlib -z max-page-size=0x1000 -T kernel/linker.ld -o $@ $(BUILD_DIR)/entry.o $(KERNEL_OBJS)
 
 # Make objects depend on Makefile to force rebuilds on build config changes
+# Removed recursive check-conflicts here for cleaner build output
 $(BUILD_DIR)/%.o: kernel/%.c Makefile | $(BUILD_DIR)
-	@$(CONFLICT_CHECK)
 	$(CC) $(CFLAGS) -c $< -o $@
 
 $(KERNEL_BIN): $(KERNEL_ELF) | $(BUILD_DIR)
 	$(OBJCOPY) -O binary $(KERNEL_ELF) $@
 
 $(STAGE2_BIN): bootloader/stage2.asm $(KERNEL_BIN) | $(BUILD_DIR)
-	@$(CONFLICT_CHECK)
 	@KERNEL_SIZE=$$(stat -c%s $(KERNEL_BIN)); \
 	$(NASM) -f bin $(NASMFLAGS) -DKERNEL_SIZE_BYTES=$$KERNEL_SIZE bootloader/stage2.asm -o $@
 
@@ -63,7 +62,6 @@ $(PAYLOAD_BIN): $(STAGE2_BIN) $(KERNEL_BIN) | $(BUILD_DIR)
 	cat $(STAGE2_BIN) $(KERNEL_BIN) > $@
 
 $(BOOT_BIN): bootloader/boot.asm $(PAYLOAD_BIN) | $(BUILD_DIR)
-	@$(CONFLICT_CHECK)
 	@TOTAL_SIZE=$$(stat -c%s $(PAYLOAD_BIN)); \
 	TOTAL_SECTORS=$$(( (TOTAL_SIZE + 511) / 512 )); \
 	$(NASM) -f bin $(NASMFLAGS) -DTOTAL_SECTORS=$$TOTAL_SECTORS bootloader/boot.asm -o $@
