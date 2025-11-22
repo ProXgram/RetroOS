@@ -45,7 +45,7 @@ static const struct shell_command COMMANDS[] = {
     {"help", command_help, "Show this help message"},
     {"about", command_about, "Learn more about " OS_NAME},
     {"clear", command_clear, "Clear the screen"},
-    {"color", command_color, "Update text colors (0-15)"},
+    {"color", command_color, "Update text colors (e.g. 'color 14 1', 'color yellow')"},
     {"ls", command_ls, "List files in the virtual FS"},
     {"cat", command_cat, "Print a file from the virtual FS"},
     {"touch", command_touch, "Create an empty file"},
@@ -53,7 +53,7 @@ static const struct shell_command COMMANDS[] = {
     {"append", command_append, "Append text to a file"},
     {"rm", command_rm, "Remove a file"},
     {"history", command_history, "Show recent commands"},
-    {"palette", command_palette, "Display VGA color codes"},
+    {"palette", command_palette, "Display VGA colors or set them (e.g. 'palette cyan')"},
     {"sysinfo", command_sysinfo, "Display hardware and memory info"},
     {"memtest", command_memtest, "Run system memory diagnostics"},
     {"logs", command_logs, "Show the latest system logs"},
@@ -62,6 +62,115 @@ static const struct shell_command COMMANDS[] = {
 #define COMMAND_COUNT (sizeof(COMMANDS) / sizeof(COMMANDS[0]))
 
 #define INPUT_CAPACITY 128
+
+static const char* COLOR_NAMES[16] = {
+    "Black", "Blue", "Green", "Cyan", "Red", "Magenta", "Brown", "Light Grey",
+    "Dark Grey", "Light Blue", "Light Green", "Light Cyan", "Light Red",
+    "Light Magenta", "Yellow", "White",
+};
+
+// ... Helper functions ...
+static int resolve_color_name(const char* input, const char** end_ptr) {
+    int best_match = -1;
+    size_t best_len = 0;
+
+    for (int i = 0; i < 16; i++) {
+        const char* name = COLOR_NAMES[i];
+        size_t name_len = kstrlen(name);
+        
+        const char* s = input;
+        const char* p = name;
+        bool match = true;
+        while (*p) {
+            char a = *s;
+            char b = *p;
+            // simple tolower
+            if (a >= 'A' && a <= 'Z') a += 32;
+            if (b >= 'A' && b <= 'Z') b += 32;
+            if (a != b) { match = false; break; }
+            s++;
+            p++;
+        }
+        
+        if (match) {
+            // Ensure full word match or end of string
+            if (*s == '\0' || *s == ' ' || *s == '\t') {
+                if (name_len > best_len) {
+                    best_match = i;
+                    best_len = name_len;
+                }
+            }
+        }
+    }
+
+    if (best_match != -1) {
+        if (end_ptr) *end_ptr = input + best_len;
+        return best_match;
+    }
+    return -1;
+}
+
+static bool parse_color_arg(const char** cursor, int* out_color) {
+    *cursor = kskip_spaces(*cursor);
+    if (**cursor == '\0') return false;
+
+    const char* tmp = *cursor;
+    unsigned int val;
+    
+    // Try number first
+    if (kparse_uint(&tmp, &val)) {
+        if (val < 16) {
+            *out_color = (int)val;
+            *cursor = tmp;
+            return true;
+        }
+    }
+
+    // Try name
+    int idx = resolve_color_name(*cursor, &tmp);
+    if (idx != -1) {
+        *out_color = idx;
+        *cursor = tmp;
+        return true;
+    }
+
+    return false;
+}
+
+static void apply_color_command(const char* args) {
+    const char* cursor = args;
+    int fg = -1;
+    int bg = -1;
+
+    // Parse first arg (FG)
+    if (!parse_color_arg(&cursor, &fg)) {
+        terminal_writestring("Usage: color <fg> [bg]\n");
+        terminal_writestring("Colors: 0-15 or names (e.g. 'black', 'light blue')\n");
+        return;
+    }
+
+    // Parse optional second arg (BG)
+    parse_color_arg(&cursor, &bg);
+
+    uint8_t current_fg, current_bg;
+    terminal_getcolors(&current_fg, &current_bg);
+
+    if (bg == -1) {
+        bg = current_bg;
+    }
+
+    terminal_setcolors((uint8_t)fg, (uint8_t)bg);
+    
+    terminal_writestring("Color set to FG: ");
+    terminal_writestring(COLOR_NAMES[fg]);
+    terminal_writestring(" (");
+    terminal_write_uint(fg);
+    terminal_writestring("), BG: ");
+    terminal_writestring(COLOR_NAMES[bg]);
+    terminal_writestring(" (");
+    terminal_write_uint(bg);
+    terminal_writestring(")\n");
+}
 
 static void shell_print_banner(void) {
     terminal_writestring(OS_BANNER_LINE "\n");
@@ -100,27 +209,7 @@ static void command_clear(const char* args) {
 }
 
 static void command_color(const char* args) {
-    const char* cursor = args;
-    unsigned int fg;
-    unsigned int bg;
-
-    if (!kparse_uint(&cursor, &fg) || !kparse_uint(&cursor, &bg) || fg > 15 || bg > 15) {
-        terminal_writestring("Usage: color <fg> <bg> (values 0-15)\n");
-        return;
-    }
-
-    cursor = kskip_spaces(cursor);
-    if (*cursor != '\0') {
-        terminal_writestring("Usage: color <fg> <bg> (values 0-15)\n");
-        return;
-    }
-
-    terminal_setcolors((uint8_t)fg, (uint8_t)bg);
-    terminal_writestring("Text colors updated to fg=");
-    terminal_write_uint(fg);
-    terminal_writestring(", bg=");
-    terminal_write_uint(bg);
-    terminal_newline();
+    apply_color_command(args);
 }
 
 static void command_history(const char* args) {
@@ -407,14 +496,13 @@ static void log_command_invocation(const char* command_name) {
     syslog_write(buffer);
 }
 
-static const char* COLOR_NAMES[16] = {
-    "Black", "Blue", "Green", "Cyan", "Red", "Magenta", "Brown", "Light Grey",
-    "Dark Grey", "Light Blue", "Light Green", "Light Cyan", "Light Red",
-    "Light Magenta", "Yellow", "White",
-};
-
 static void command_palette(const char* args) {
-    (void)args;
+    // If arguments are provided, try to apply them as color settings
+    const char* check = kskip_spaces(args);
+    if (*check != '\0') {
+        apply_color_command(args);
+        return;
+    }
 
     uint8_t original_fg = 0;
     uint8_t original_bg = 0;
@@ -493,3 +581,4 @@ void shell_run(void) {
         execute_command(input);
     }
 }
+                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                            
