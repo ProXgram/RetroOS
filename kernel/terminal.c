@@ -1,102 +1,105 @@
 #include "terminal.h"
 #include <stdbool.h>
-#include "io.h"
+#include "graphics.h"
+#include "system.h"
 
-#define VGA_WIDTH 80
-#define VGA_HEIGHT 25
-#define VGA_MEMORY ((uint16_t*)0xB8000)
+#define FONT_W 8
+#define FONT_H 8
 
-/* Scrollback Configuration */
-#define HISTORY_LINES 200  // Store up to 200 lines of history
+// Standard VGA Colors converted to 32-bit ARGB
+static const uint32_t VGA_PALETTE[16] = {
+    0xFF000000, // 0: Black
+    0xFF0000AA, // 1: Blue
+    0xFF00AA00, // 2: Green
+    0xFF00AAAA, // 3: Cyan
+    0xFFAA0000, // 4: Red
+    0xFFAA00AA, // 5: Magenta
+    0xFFAA5500, // 6: Brown
+    0xFFAAAAAA, // 7: Light Grey
+    0xFF555555, // 8: Dark Grey
+    0xFF5555FF, // 9: Light Blue
+    0xFF55FF55, // 10: Light Green
+    0xFF55FFFF, // 11: Light Cyan
+    0xFFFF5555, // 12: Light Red
+    0xFFFF55FF, // 13: Light Magenta
+    0xFFFFFF55, // 14: Yellow
+    0xFFFFFFFF  // 15: White
+};
+
+#define HISTORY_LINES 200
 
 static size_t terminal_row;
 static size_t terminal_column;
-static uint8_t terminal_color;
-static size_t terminal_width = VGA_WIDTH;
-static size_t terminal_height = VGA_HEIGHT;
+static uint8_t terminal_color_fg;
+static uint8_t terminal_color_bg;
+static size_t terminal_cols;
+static size_t terminal_rows;
 static size_t terminal_batch_depth;
 
-/* History Buffer in BSS (RAM) */
-static uint16_t g_history[HISTORY_LINES * VGA_WIDTH];
-static size_t g_scroll_offset = 0; // 0 = view bottom. >0 = look back N lines.
+// Store char + color info (1 byte char, 1 byte color)
+// High byte = Color index (low nibble FG, high nibble BG)
+// Low byte = Char
+static uint16_t g_history[HISTORY_LINES * 200]; // Max 200 cols assumption
+static size_t g_scroll_offset = 0;
 
-static inline uint16_t vga_entry(char c, uint8_t color) {
-    return (uint16_t)(uint8_t)c | ((uint16_t)color << 8);
+static inline uint16_t make_entry(char c, uint8_t fg, uint8_t bg) {
+    uint8_t color = fg | (bg << 4);
+    return (uint16_t)c | ((uint16_t)color << 8);
 }
 
-static inline uint8_t make_color(uint8_t fg, uint8_t bg) {
-    return fg | (bg << 4);
+void terminal_initialize(uint32_t width, uint32_t height) {
+    graphics_init();
+    
+    // Calculate columns/rows based on font size
+    terminal_cols = graphics_get_width() / FONT_W;
+    terminal_rows = graphics_get_height() / FONT_H;
+    
+    // Sanity check bounds for static buffer
+    if (terminal_cols > 200) terminal_cols = 200;
+    
+    terminal_row = 0;
+    terminal_column = 0;
+    terminal_color_fg = 15; // White
+    terminal_color_bg = 1;  // Blue
+    g_scroll_offset = 0;
+    terminal_batch_depth = 0;
+
+    terminal_clear();
 }
 
-static void terminal_update_cursor(void) {
-    if (terminal_batch_depth > 0) return;
-
-    // If we are scrolled up, hide the cursor effectively
-    if (g_scroll_offset > 0) {
-        // Move cursor off-screen to 0, height+1
-        uint16_t pos = (uint16_t)(VGA_WIDTH * VGA_HEIGHT);
-        outb(0x3D4, 0x0F); outb(0x3D5, (uint8_t)(pos & 0xFF));
-        outb(0x3D4, 0x0E); outb(0x3D5, (uint8_t)((pos >> 8) & 0xFF));
-        return;
-    }
-
-    // Calculate cursor position relative to the visible window (bottom 25 lines)
-    // The visual cursor is always at the specific row 0-24 on screen.
-    // However, our terminal_row logic might be different if we use a long buffer.
-    
-    // Simplification: We only draw the cursor if it's in the visible area.
-    // Since we force scroll to 0 on typing, the cursor is always visible at the bottom when active.
-    
-    // We need to map terminal_row (which is 0..HISTORY_LINES-1) to screen row (0..24).
-    // Actually, in this implementation, terminal_row will stay bounded 0..24 for logic simplicity,
-    // and we shift the buffer contents up.
-    
-    const uint16_t position = (uint16_t)(terminal_row * VGA_WIDTH + terminal_column);
-    outb(0x3D4, 0x0F);
-    outb(0x3D5, (uint8_t)(position & 0xFF));
-    outb(0x3D4, 0x0E);
-    outb(0x3D5, (uint8_t)((position >> 8) & 0xFF));
-}
-
-// Blit the history buffer to VGA memory based on scroll offset
 static void terminal_refresh_screen(void) {
     if (terminal_batch_depth > 0) return;
 
-    // We treat g_history as a ring or linear buffer? 
-    // Let's use linear. g_history holds the data.
-    // The "active" screen is always the *last* VGA_HEIGHT lines of valid data in history?
-    // No, that's complex to manage row indices.
+    size_t view_h = terminal_rows;
+    size_t start_row = 0;
     
-    // Strategy: 
-    // terminal_row is 0..VGA_HEIGHT-1.
-    // When we newline at bottom, we memmove g_history up, discard top line.
-    // So g_history[0] is essentially "top of visible screen" if scroll_offset=0?
-    // Wait, to support history, we need the buffer to be LARGER than screen.
-    
-    // NEW STRATEGY: 
-    // terminal_row tracks the *logical* cursor line in g_history (0 to HISTORY_LINES-1).
-    // When terminal_row hits limit, we shift the whole array up.
-    
-    size_t start_row_index;
-    if (terminal_row < VGA_HEIGHT) {
-        start_row_index = 0;
-    } else {
-        start_row_index = terminal_row - (VGA_HEIGHT - 1);
+    if (terminal_row >= view_h) {
+        start_row = terminal_row - (view_h - 1);
     }
-    
-    // Apply scroll offset (looking back)
-    if (g_scroll_offset > start_row_index) g_scroll_offset = start_row_index; // Clamp
-    start_row_index -= g_scroll_offset;
+    if (g_scroll_offset > start_row) g_scroll_offset = start_row;
+    start_row -= g_scroll_offset;
 
-    volatile uint16_t* vga = VGA_MEMORY;
-    for (size_t y = 0; y < VGA_HEIGHT; y++) {
-        for (size_t x = 0; x < VGA_WIDTH; x++) {
-            size_t hist_idx = (start_row_index + y) * VGA_WIDTH + x;
-            vga[y * VGA_WIDTH + x] = g_history[hist_idx];
+    for (size_t y = 0; y < view_h; y++) {
+        for (size_t x = 0; x < terminal_cols; x++) {
+            size_t hist_idx = (start_row + y) * terminal_cols + x;
+            uint16_t entry = g_history[hist_idx];
+            char c = (char)(entry & 0xFF);
+            uint8_t color_byte = (uint8_t)(entry >> 8);
+            uint8_t fg_idx = color_byte & 0x0F;
+            uint8_t bg_idx = (color_byte >> 4) & 0x0F;
+
+            uint32_t fg = VGA_PALETTE[fg_idx];
+            uint32_t bg = VGA_PALETTE[bg_idx];
+
+            graphics_draw_char(x * FONT_W, y * FONT_H, c, fg, bg);
         }
     }
     
-    terminal_update_cursor();
+    // Draw cursor
+    if (g_scroll_offset == 0) {
+        size_t cur_y = (terminal_row >= view_h) ? (view_h - 1) : terminal_row;
+        graphics_fill_rect(terminal_column * FONT_W, cur_y * FONT_H + (FONT_H-2), FONT_W, 2, VGA_PALETTE[terminal_color_fg]);
+    }
 }
 
 void terminal_begin_batch(void) {
@@ -108,74 +111,52 @@ void terminal_end_batch(void) {
     if (terminal_batch_depth == 0) terminal_refresh_screen();
 }
 
-static void scroll_buffer_if_needed(void) {
-    // If cursor moves past the end of our huge history buffer
-    if (terminal_row >= HISTORY_LINES) {
-        // Shift entire history up by 1 line
-        // 1. Move data
-        for (size_t i = 0; i < (HISTORY_LINES - 1) * VGA_WIDTH; i++) {
-            g_history[i] = g_history[i + VGA_WIDTH];
-        }
-        // 2. Clear new last line
-        size_t last_row_start = (HISTORY_LINES - 1) * VGA_WIDTH;
-        for (size_t i = 0; i < VGA_WIDTH; i++) {
-            g_history[last_row_start + i] = vga_entry(' ', terminal_color);
-        }
-        // 3. Decrement cursor so it stays valid
-        terminal_row = HISTORY_LINES - 1;
-    }
-}
-
-void terminal_initialize(uint32_t width, uint32_t height) {
-    terminal_batch_depth = 0;
-    terminal_width = (width > 0) ? width : VGA_WIDTH;
-    terminal_height = (height > 0) ? height : VGA_HEIGHT;
-    terminal_color = make_color(0x0F, 0x01); // White on Blue
-    terminal_row = 0;
-    terminal_column = 0;
-    g_scroll_offset = 0;
-    terminal_clear();
-}
-
 void terminal_clear(void) {
+    for (size_t i = 0; i < HISTORY_LINES * terminal_cols; i++) {
+        g_history[i] = make_entry(' ', terminal_color_fg, terminal_color_bg);
+    }
     terminal_row = 0;
     terminal_column = 0;
     g_scroll_offset = 0;
-
-    // Clear entire history
-    for (size_t i = 0; i < HISTORY_LINES * VGA_WIDTH; i++) {
-        g_history[i] = vga_entry(' ', terminal_color);
-    }
-    
     terminal_refresh_screen();
 }
 
 void terminal_setcolors(uint8_t fg, uint8_t bg) {
-    terminal_color = make_color(fg, bg);
+    terminal_color_fg = fg;
+    terminal_color_bg = bg;
 }
 
 void terminal_set_theme(uint8_t fg, uint8_t bg) {
-    terminal_color = make_color(fg, bg);
-    // Update entire history
-    for (size_t i = 0; i < HISTORY_LINES * VGA_WIDTH; i++) {
-        uint8_t c = (uint8_t)(g_history[i] & 0xFF);
-        g_history[i] = vga_entry((char)c, terminal_color);
+    terminal_color_fg = fg;
+    terminal_color_bg = bg;
+    for (size_t i = 0; i < HISTORY_LINES * terminal_cols; i++) {
+        char c = (char)(g_history[i] & 0xFF);
+        g_history[i] = make_entry(c, fg, bg);
     }
     terminal_refresh_screen();
 }
 
 void terminal_getcolors(uint8_t* fg, uint8_t* bg) {
-    if (fg) *fg = terminal_color & 0x0F;
-    if (bg) *bg = (terminal_color >> 4) & 0x0F;
+    if (fg) *fg = terminal_color_fg;
+    if (bg) *bg = terminal_color_bg;
 }
 
-static void terminal_setcell(size_t x, size_t y, char c) {
-    if (x >= terminal_width || y >= HISTORY_LINES) return;
-    g_history[y * VGA_WIDTH + x] = vga_entry(c, terminal_color);
+static void scroll_buffer_if_needed(void) {
+    if (terminal_row >= HISTORY_LINES) {
+        // Shift up
+        for (size_t i = 0; i < (HISTORY_LINES - 1) * terminal_cols; i++) {
+            g_history[i] = g_history[i + terminal_cols];
+        }
+        // Clear new line
+        size_t last = (HISTORY_LINES - 1) * terminal_cols;
+        for (size_t i = 0; i < terminal_cols; i++) {
+            g_history[last + i] = make_entry(' ', terminal_color_fg, terminal_color_bg);
+        }
+        terminal_row = HISTORY_LINES - 1;
+    }
 }
 
 void terminal_write_char(char c) {
-    // Reset scroll on typing
     if (g_scroll_offset != 0) {
         g_scroll_offset = 0;
         terminal_refresh_screen();
@@ -188,33 +169,29 @@ void terminal_write_char(char c) {
         terminal_refresh_screen();
         return;
     }
-
-    if (c == '\r') {
-        terminal_column = 0;
-        terminal_refresh_screen();
-        return;
-    }
-
+    
     if (c == '\b') {
-        if (terminal_column > 0) {
-            terminal_column--;
-        } else if (terminal_row > 0) {
+        if (terminal_column > 0) terminal_column--;
+        else if (terminal_row > 0) {
             terminal_row--;
-            terminal_column = terminal_width - 1;
+            terminal_column = terminal_cols - 1;
         }
-        terminal_setcell(terminal_column, terminal_row, ' ');
+        size_t idx = terminal_row * terminal_cols + terminal_column;
+        g_history[idx] = make_entry(' ', terminal_color_fg, terminal_color_bg);
         terminal_refresh_screen();
         return;
     }
-
-    terminal_setcell(terminal_column, terminal_row, c);
-    terminal_column++;
-    if (terminal_column >= terminal_width) {
+    
+    if (terminal_column >= terminal_cols) {
         terminal_column = 0;
         terminal_row++;
         scroll_buffer_if_needed();
     }
 
+    size_t idx = terminal_row * terminal_cols + terminal_column;
+    g_history[idx] = make_entry(c, terminal_color_fg, terminal_color_bg);
+    terminal_column++;
+    
     terminal_refresh_screen();
 }
 
@@ -231,18 +208,14 @@ void terminal_writestring(const char* data) {
 }
 
 void terminal_write_uint(unsigned int value) {
-    terminal_begin_batch();
-    char buffer[12];
-    size_t index = 0;
-    if (value == 0) {
-        terminal_write_char('0');
-    } else {
-        while (value > 0 && index < sizeof(buffer)) {
-            buffer[index++] = (char)('0' + (value % 10));
-            value /= 10;
-        }
-        while (index > 0) terminal_write_char(buffer[--index]);
+    char buf[16];
+    int i = 0;
+    if (value == 0) { buf[i++] = '0'; }
+    else {
+        while(value > 0) { buf[i++] = '0' + (value % 10); value /= 10; }
     }
+    terminal_begin_batch();
+    while(i > 0) terminal_write_char(buf[--i]);
     terminal_end_batch();
 }
 
@@ -251,25 +224,17 @@ void terminal_newline(void) {
 }
 
 void terminal_move_cursor_left(size_t count) {
-    while (count--) {
-        if (terminal_column > 0) terminal_column--;
-    }
+    while(count--) if(terminal_column > 0) terminal_column--;
     terminal_refresh_screen();
 }
 
 void terminal_move_cursor_right(size_t count) {
-    while (count--) {
-        if (terminal_column < terminal_width - 1) terminal_column++;
-    }
+    while(count--) if(terminal_column < terminal_cols - 1) terminal_column++;
     terminal_refresh_screen();
 }
 
 void terminal_scroll_up(void) {
-    // Look further back
-    size_t max_scroll;
-    if (terminal_row < VGA_HEIGHT) max_scroll = 0;
-    else max_scroll = terminal_row - (VGA_HEIGHT - 1);
-    
+    size_t max_scroll = (terminal_row < terminal_rows) ? 0 : (terminal_row - (terminal_rows - 1));
     if (g_scroll_offset < max_scroll) {
         g_scroll_offset++;
         terminal_refresh_screen();
@@ -277,10 +242,8 @@ void terminal_scroll_up(void) {
 }
 
 void terminal_scroll_down(void) {
-    // Look closer to current
     if (g_scroll_offset > 0) {
         g_scroll_offset--;
         terminal_refresh_screen();
     }
 }
-// test][
