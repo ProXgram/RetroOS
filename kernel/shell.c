@@ -13,6 +13,7 @@
 #include "system.h"
 #include "syslog.h"
 #include "terminal.h"
+#include "timer.h"
 
 struct shell_command {
     const char* name;
@@ -42,9 +43,12 @@ static void command_reboot(const char* args);
 static void command_shutdown(const char* args);
 static void command_time(const char* args);
 static void command_calc(const char* args);
-
 static void command_history(const char* args);
 static void command_palette(const char* args);
+
+// <--- NEW COMMANDS
+static void command_uptime(const char* args);
+static void command_sleep(const char* args);
 
 static void log_command_invocation(const char* command_name);
 
@@ -53,6 +57,8 @@ static const struct shell_command COMMANDS[] = {
     {"about", command_about, "Learn more about " OS_NAME},
     {"clear", command_clear, "Clear the screen"},
     {"time", command_time, "Show current RTC date/time"},
+    {"uptime", command_uptime, "Show time since boot"},  
+    {"sleep", command_sleep, "Pause for N seconds"},     
     {"calc", command_calc, "Simple math (e.g. 'calc 10 + 5')"},
     {"foreground", command_foreground, "Set text color"},
     {"background", command_background, "Set background color"},
@@ -102,6 +108,7 @@ static uint8_t get_rtc_register(int reg) {
     return inb(CMOS_DATA);
 }
 
+// ... (Keep existing command_time implementation) ...
 static void command_time(const char* args) {
     (void)args;
     
@@ -155,7 +162,39 @@ static void command_time(const char* args) {
     terminal_newline();
 }
 
-// Calc Helper
+// ... (Keep existing helpers like command_calc, color parsing) ...
+
+// <--- NEW COMMANDS IMPLEMENTATION
+static void command_uptime(const char* args) {
+    (void)args;
+    uint64_t seconds = timer_get_uptime();
+    terminal_writestring("System Uptime: ");
+    terminal_write_uint((unsigned int)seconds);
+    terminal_writestring(" seconds (");
+    terminal_write_uint((unsigned int)timer_get_ticks());
+    terminal_writestring(" ticks)\n");
+}
+
+static void command_sleep(const char* args) {
+    const char* ptr = kskip_spaces(args);
+    unsigned int sec = 0;
+    if (!kparse_uint(&ptr, &sec)) {
+        terminal_writestring("Usage: sleep <seconds>\n");
+        return;
+    }
+    
+    terminal_writestring("Sleeping for ");
+    terminal_write_uint(sec);
+    terminal_writestring(" seconds...\n");
+    
+    // We initialized timer at 100Hz, so 1 sec = 100 ticks
+    timer_wait((int)sec * 100);
+    
+    terminal_writestring("Done.\n");
+}
+
+// ... (Rest of file remains unchanged below, simply pasting existing functions for context) ...
+
 static void command_calc(const char* args) {
     const char* cursor = kskip_spaces(args);
     unsigned int a = 0, b = 0;
@@ -225,7 +264,6 @@ static int resolve_color_name(const char* input, const char** end_ptr) {
         while (*p) {
             char a = *s;
             char b = *p;
-            // simple tolower
             if (a >= 'A' && a <= 'Z') a += 32;
             if (b >= 'A' && b <= 'Z') b += 32;
             if (a != b) { match = false; break; }
@@ -307,8 +345,6 @@ static bool parse_filename_token(const char* args, char* dest, size_t dest_size,
     return true;
 }
 
-// --- Command Handlers ---
-
 static void command_foreground(const char* args) {
     const char* cursor = args;
     int fg = -1;
@@ -377,7 +413,6 @@ static void command_help(const char* args) {
         terminal_writestring("  ");
         terminal_writestring(COMMANDS[i].name);
         
-        // Alignment padding
         size_t len = kstrlen(COMMANDS[i].name);
         size_t pad = (len < 12) ? (12 - len) : 1;
         
@@ -527,11 +562,8 @@ static void command_hexdump(const char* args) {
     size_t size = entry->size;
     
     for (size_t i = 0; i < size; i += 16) {
-        // Print offset
         print_hex(i, 4);
         terminal_writestring(": ");
-
-        // Print Hex
         for (size_t j = 0; j < 16; j++) {
             if (i + j < size) {
                 print_hex(data[i + j], 2);
@@ -540,10 +572,7 @@ static void command_hexdump(const char* args) {
                 terminal_writestring("   ");
             }
         }
-
         terminal_writestring("| ");
-
-        // Print ASCII
         for (size_t j = 0; j < 16; j++) {
             if (i + j < size) {
                 unsigned char c = data[i + j];
@@ -703,7 +732,6 @@ static void command_reboot(const char* args) {
         temp = inb(0x64);
     outb(0x64, 0xFE);
     
-    // Halt if reboot fails
     for(;;) {
         __asm__ volatile ("hlt");
     }
@@ -713,11 +741,9 @@ static void command_shutdown(const char* args) {
     (void)args;
     terminal_writestring("Shutting down...\n");
 
-    // QEMU / Bochs shutdown sequence (older and newer ports)
+    // QEMU / Bochs shutdown sequence
     __asm__ volatile ("outw %0, %1" : : "a"((uint16_t)0x2000), "d"((uint16_t)0x604));
     __asm__ volatile ("outw %0, %1" : : "a"((uint16_t)0x2000), "d"((uint16_t)0xB004));
-    
-    // VirtualBox shutdown
     __asm__ volatile ("outw %0, %1" : : "a"((uint16_t)0x3400), "d"((uint16_t)0x4004));
 
     terminal_writestring("Shutdown failed (ACPI not implemented). Halting CPU.\n");
@@ -748,7 +774,7 @@ static void log_command_invocation(const char* command_name) {
 }
 
 static void command_palette(const char* args) {
-    (void)args; // Arguments ignored, palette is for viewing only.
+    (void)args;
 
     uint8_t original_fg = 0;
     uint8_t original_bg = 0;
