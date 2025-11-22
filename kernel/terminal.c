@@ -22,8 +22,13 @@ enum terminal_mode {
 static enum terminal_mode current_mode = TERMINAL_MODE_VGA_TEXT;
 
 static inline uint16_t vga_entry(char c, uint8_t color) {
-    return (uint16_t)c | ((uint16_t)color << 8);
+    /* 
+     * Cast to uint8_t first to prevent sign extension of extended ASCII 
+     * characters (like 0xDB) which would otherwise overwrite the color bits.
+     */
+    return (uint16_t)(uint8_t)c | ((uint16_t)color << 8);
 }
+
 static inline uint8_t make_color(uint8_t fg, uint8_t bg) {
     return fg | (bg << 4);
 }
@@ -145,6 +150,25 @@ void terminal_clear(void) {
 
 void terminal_setcolors(uint8_t fg, uint8_t bg) {
     terminal_color = make_color(fg, bg);
+}
+
+void terminal_set_theme(uint8_t fg, uint8_t bg) {
+    terminal_color = make_color(fg, bg);
+
+    terminal_begin_batch();
+    /* Iterate over the entire visible screen and update attributes */
+    for (size_t y = 0; y < terminal_height; y++) {
+        for (size_t x = 0; x < terminal_width; x++) {
+            const size_t index = y * VGA_WIDTH + x;
+            
+            /* Preserve the existing character, only update the color */
+            uint16_t current_entry = terminal_buffer[index];
+            char current_char = (char)(current_entry & 0xFF);
+            
+            terminal_buffer[index] = vga_entry(current_char, terminal_color);
+        }
+    }
+    terminal_end_batch();
 }
 
 void terminal_getcolors(uint8_t* fg, uint8_t* bg) {
