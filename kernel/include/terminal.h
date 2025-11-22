@@ -20,4 +20,8 @@ void terminal_newline(void);
 void terminal_move_cursor_left(size_t count);
 void terminal_move_cursor_right(size_t count);
 
+/* Scrolling Support */
+void terminal_scroll_up(void);
+void terminal_scroll_down(void);
+
 #endif /* TERMINAL_H */
