@@ -17,10 +17,12 @@ start:
     mov [boot_drive], dl
 
     mov si, disk_address_packet
-    mov word [si + 4], stage2_offset
-    mov word [si + 6], 0x0000
+    mov word [si + 4], stage2_offset & 0x000F
+    mov word [si + 6], stage2_offset >> 4
     mov dword [si + 8], 1
     mov dword [si + 12], 0
+
+    mov dword [buffer_pointer], stage2_offset
 
     mov cx, TOTAL_SECTORS
 
@@ -51,11 +53,17 @@ start:
     pop cx
     sub cx, ax
 
+    movzx eax, ax
+    shl eax, 9
+    add dword [buffer_pointer], eax
+
     mov si, disk_address_packet
-    mov bx, ax
-    shl bx, 9
-    add word [si + 4], bx
-    adc word [si + 6], 0
+    mov eax, [buffer_pointer]
+    mov dx, ax
+    and dx, 0x000F
+    mov [si + 4], dx
+    shr eax, 4
+    mov [si + 6], ax
 
     mov bx, [si + 8]
     add bx, ax
@@ -92,6 +100,7 @@ disk_error:
 
 boot_drive: db 0
 stage2_offset equ 0x7E00
+buffer_pointer: dd stage2_offset
 
 disk_address_packet:
     db 0x10
