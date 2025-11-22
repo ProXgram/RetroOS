@@ -4,6 +4,7 @@
 #include "timer.h"
 #include "sound.h"
 #include <stdint.h>
+#include <stdbool.h>
 
 #define SCREEN_W 80
 #define SCREEN_H 25
@@ -48,25 +49,6 @@ static void draw_point(int x, int y, char c, uint8_t fg, uint8_t bg) {
     terminal_set_theme(fg, bg);
     // We hack access via moving cursor and writing char for now,
     // as terminal.c doesn't expose direct set_at_xy
-    // Using terminal batch commands would be cleaner, but we need X/Y
-    // For now, we assume we can just clear screen and redraw, but that flickers.
-    // Let's add a helper to terminal.c or just use internal knowledge?
-    // Actually, terminal.c has no "set_cursor(x,y)" public API.
-    // We will assume the shell cleared the screen, and we track cursor or 
-    // reconstruct the scene.
-    
-    // Implementation Hack:
-    // Since we don't have terminal_set_cursor(x,y), we rely on the fact
-    // the terminal driver handles wrapping. But to do this properly in 
-    // this specific OS architecture, we should probably add `terminal_set_cursor`
-    // to terminal.h. For now, we will implement a poor man's version:
-    // However, looking at terminal.c, terminal_row/col are static.
-    // We will rely on a full redraw approach or modifying terminal.c?
-    // Modification to terminal.c is best, but I am in snake.c.
-    
-    // WORKAROUND: We will abuse the fact that we are the only thing running.
-    // We will implement a soft-buffer here if needed, or just accept
-    // that we can't seek. 
     
     // WAIT! terminal_buffer is at 0xB8000. We can write directly!
     volatile uint16_t* vga = (volatile uint16_t*)0xB8000;
@@ -144,34 +126,6 @@ void snake_game_run(void) {
         // Check Fruit
         if (snake[0].x == fruit.x && snake[0].y == fruit.y) {
             snake_len++;
-            // Restore tail just in case (it grows)
-            // Actually we just don't erase the tail next frame, but logic here is 
-            // to append. The loop above shifted the array. The old tail pos is lost
-            // unless we track it.
-            // Simpler: Just extend len, the new segment appears at next move.
-            // But we erased the tail visually above.
-            // Let's redraw the new tail segment (which was the old tail)
-            // Ideally, logic should separate update from draw.
-            // Simplification: Grow logic -> Restore the visual of the tail we just erased
-            // Actually, simpler to just NOT erase tail if eating.
-            
-            // FIX: Re-draw the tail we just erased if we grew
-            // But we overwrote the coordinate in the array shift. 
-            // Snake logic is tricky in C without dynamic lists.
-            
-            // Proper Logic:
-            // If eating: shift is same, but we add a segment at the END equal to the old end.
-            // Since we already shifted, the old end is gone from the array.
-            // Let's fix the move logic:
-            // 1. Calc new head.
-            // 2. If Fruit: Add Head, Keep Tail (snake_len++).
-            // 3. If No Fruit: Add Head, Remove Tail.
-            
-            // Revert logic for simplicity of this snippet:
-            // We just moved. If head == fruit, we effectively grew into the empty space 
-            // left by the tail? No.
-            // We need to keep the tail. 
-            // Let's just extend the array from the *back*.
             snake[snake_len] = snake[snake_len-1]; // Duplicate tail
             snake_len++;
             score += 10;
