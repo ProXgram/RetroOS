@@ -63,11 +63,11 @@ static const struct keymap_entry KEYMAP_SET1[128] = {
     [0x2F] = KM('v', 'V'), [0x30] = KM('b', 'B'), [0x31] = KM('n', 'N'),
     [0x32] = KM('m', 'M'), [0x33] = KM(',', '<'), [0x34] = KM('.', '>'),
     [0x35] = KM('/', '?'), [0x39] = KM(' ', ' '),
-    // Basic Arrow Key Mapping (Extended scan codes mapped to high values for logic)
-    [0x48] = KM('w', 'W'), // Up (Mapped to W for simplicity if raw)
-    [0x4B] = KM('a', 'A'), // Left
-    [0x50] = KM('s', 'S'), // Down
-    [0x4D] = KM('d', 'D'), // Right
+    // Basic Arrow Key Mapping
+    [0x48] = KM(0, 0), 
+    [0x4B] = KM(0, 0), 
+    [0x50] = KM(0, 0), 
+    [0x4D] = KM(0, 0), 
 };
 
 /* --- Driver Core --- */
@@ -96,11 +96,8 @@ static uint8_t keyboard_pop_byte(void) {
     return byte;
 }
 
-// NEW: Non-blocking pop
 static bool keyboard_try_pop_byte(uint8_t* out) {
-    if (g_kb_head == g_kb_tail) {
-        return false;
-    }
+    if (g_kb_head == g_kb_tail) return false;
     *out = g_kb_buffer[g_kb_tail];
     g_kb_tail = (g_kb_tail + 1) & SCANCODE_BUFFER_MASK;
     return true;
@@ -120,26 +117,19 @@ static uint16_t keyboard_read_scancode(void) {
     }
 }
 
-// NEW: Non-blocking scancode read
 static bool keyboard_poll_scancode(uint16_t* out_code) {
     uint8_t val;
     static uint16_t prefix = 0;
     
-    // This state machine is simplified for non-blocking; 
-    // if we have a prefix but no second byte, we return false
-    // effectively waiting for the next poll cycle.
-    
-    if (!keyboard_try_pop_byte(&val)) {
-        return false;
-    }
+    if (!keyboard_try_pop_byte(&val)) return false;
 
     if (val == SCANCODE_EXTENDED) {
         prefix = SCANCODE_EXTENDED_MASK;
-        return false; // Consumed prefix, try again next poll
+        return false;
     }
 
     *out_code = prefix | val;
-    prefix = 0; // Reset
+    prefix = 0;
     return true;
 }
 
@@ -161,7 +151,6 @@ static char translate_scancode(uint8_t scancode) {
     bool is_alpha = (entry.normal >= 'a' && entry.normal <= 'z');
     
     if (is_alpha) {
-        // Invert shift for letters if caps lock is on
         if (g_caps_lock) shift = !shift;
     }
 
@@ -169,21 +158,17 @@ static char translate_scancode(uint8_t scancode) {
 }
 
 /* --- History System --- */
-
+// (Keeping existing implementation details for history as is)
 static size_t history_start_idx(void) {
     return (g_history_count > KEYBOARD_HISTORY_LIMIT) ? 
            (g_history_count - KEYBOARD_HISTORY_LIMIT) : 0;
 }
-
 static const char* history_get_abs(size_t abs_idx) {
     if (abs_idx >= g_history_count || abs_idx < history_start_idx()) return NULL;
     return g_history[abs_idx % KEYBOARD_HISTORY_LIMIT];
 }
-
 void keyboard_history_record(const char* line) {
     if (kstrlen(line) == 0) return;
-
-    // Don't record duplicates
     if (g_history_count > 0) {
         size_t last = (g_history_count - 1) % KEYBOARD_HISTORY_LIMIT;
         if (kstrcmp(g_history[last], line) == 0) {
@@ -191,7 +176,6 @@ void keyboard_history_record(const char* line) {
             return;
         }
     }
-
     size_t slot = g_history_count % KEYBOARD_HISTORY_LIMIT;
     size_t len = 0;
     while (line[len] && len < KEYBOARD_MAX_LINE - 1) {
@@ -199,43 +183,34 @@ void keyboard_history_record(const char* line) {
         len++;
     }
     g_history[slot][len] = '\0';
-    
     g_history_count++;
     g_history_view_idx = g_history_count;
 }
-
 size_t keyboard_history_length(void) {
     size_t start = history_start_idx();
     return g_history_count - start;
 }
-
 const char* keyboard_history_entry(size_t relative_idx) {
     return history_get_abs(history_start_idx() + relative_idx);
 }
-
 void keyboard_history_reset_iteration(void) {
     g_history_view_idx = g_history_count;
 }
-
 const char* keyboard_history_step(int dir) {
     size_t start = history_start_idx();
-    
-    if (dir < 0) { // Up (Older)
+    if (dir < 0) { 
         if (g_history_view_idx > start) g_history_view_idx--;
         return history_get_abs(g_history_view_idx);
     } 
-    
-    if (dir > 0) { // Down (Newer)
+    if (dir > 0) { 
         if (g_history_view_idx < g_history_count) g_history_view_idx++;
-        if (g_history_view_idx == g_history_count) return ""; // Empty line at bottom
+        if (g_history_view_idx == g_history_count) return ""; 
         return history_get_abs(g_history_view_idx);
     }
-    
     return NULL;
 }
 
 /* --- Line Editing Utilities --- */
-// (Keeping existing static helpers: edit_clear, edit_replace, edit_insert, edit_delete)
 static void edit_clear(size_t cursor, size_t length) {
     if (length == 0) return;
     terminal_begin_batch();
@@ -243,7 +218,6 @@ static void edit_clear(size_t cursor, size_t length) {
     for (size_t i = 0; i < length; i++) terminal_write_char('\b');
     terminal_end_batch();
 }
-
 static void edit_replace(const char* src, char* buf, size_t max, size_t* len, size_t* cur) {
     terminal_begin_batch();
     edit_clear(*cur, *len);
@@ -258,25 +232,19 @@ static void edit_replace(const char* src, char* buf, size_t max, size_t* len, si
     *cur = i;
     terminal_end_batch();
 }
-
 static void edit_insert(char c, char* buf, size_t max, size_t* len, size_t* cur) {
     if (*len + 1 >= max) return;
-    
     terminal_begin_batch();
     for (size_t i = *len; i > *cur; i--) buf[i] = buf[i - 1];
-    
     buf[*cur] = c;
     (*len)++;
     (*cur)++;
     buf[*len] = '\0';
-
-    // Redraw tail
     terminal_write(&buf[*cur - 1], *len - (*cur - 1));
     size_t tail_len = *len - *cur;
     if (tail_len > 0) terminal_move_cursor_left(tail_len);
     terminal_end_batch();
 }
-
 static void edit_delete(char* buf, size_t* len, size_t* cur, bool backspace) {
     if (backspace) {
         if (*cur == 0) return;
@@ -284,19 +252,14 @@ static void edit_delete(char* buf, size_t* len, size_t* cur, bool backspace) {
     } else {
         if (*cur >= *len) return;
     }
-
     terminal_begin_batch();
-    // Shift buffer
     for (size_t i = *cur; i < *len; i++) buf[i] = buf[i + 1];
     (*len)--;
     buf[*len] = '\0';
-
-    // Visual update
     if (backspace) terminal_move_cursor_left(1);
-    
     size_t tail_len = *len - *cur;
     if (tail_len > 0) terminal_write(&buf[*cur], tail_len);
-    terminal_write_char(' '); // Erase last char
+    terminal_write_char(' '); 
     terminal_move_cursor_left(tail_len + 1);
     terminal_end_batch();
 }
@@ -318,7 +281,6 @@ char keyboard_get_char(void) {
     }
 }
 
-// NEW: Poll function
 char keyboard_poll_char(void) {
     uint16_t raw;
     if (!keyboard_poll_scancode(&raw)) return 0;
@@ -375,6 +337,12 @@ void keyboard_read_line(char* buffer, size_t size) {
                 case 0x50: // Down
                     if ((hist_str = keyboard_history_step(1))) 
                         edit_replace(hist_str, buffer, size, &len, &cur);
+                    break;
+                case 0x49: // Page Up
+                    terminal_scroll_up();
+                    break;
+                case 0x51: // Page Down
+                    terminal_scroll_down();
                     break;
             }
             continue;
