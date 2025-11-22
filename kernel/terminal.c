@@ -22,9 +22,12 @@ enum terminal_mode {
 static enum terminal_mode current_mode = TERMINAL_MODE_VGA_TEXT;
 
 static inline uint16_t vga_entry(char c, uint8_t color) {
-    return (uint16_t)c | ((uint16_t)color << 8);
+    /* 
+     * Cast to uint8_t first to prevent sign extension of extended ASCII 
+     * characters (like 0xDB) which would otherwise overwrite the color bits.
+     */
+    return (uint16_t)(uint8_t)c | ((uint16_t)color << 8);
 }
-
 static inline uint8_t make_color(uint8_t fg, uint8_t bg) {
     return fg | (bg << 4);
 }
