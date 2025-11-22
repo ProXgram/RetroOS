@@ -159,7 +159,8 @@ static void apply_color_command(const char* args) {
         bg = current_bg;
     }
 
-    terminal_setcolors((uint8_t)fg, (uint8_t)bg);
+    // Use terminal_set_theme to update the entire screen immediately
+    terminal_set_theme((uint8_t)fg, (uint8_t)bg);
     
     terminal_writestring("Color set to FG: ");
     terminal_writestring(COLOR_NAMES[fg]);
@@ -581,4 +582,3 @@ void shell_run(void) {
         execute_command(input);
     }
 }
-                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                            
