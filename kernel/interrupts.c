@@ -5,6 +5,7 @@
 #include <stdint.h>
 #include "syslog.h"
 #include "io.h"
+#include "keyboard.h"
 
 struct interrupt_frame {
     uint64_t rip;
@@ -31,12 +32,12 @@ struct idt_descriptor {
 
 static struct idt_entry g_idt[256];
 
-enum {
-    PIC1_COMMAND = 0x20,
-    PIC1_DATA = 0x21,
-    PIC2_COMMAND = 0xA0,
-    PIC2_DATA = 0xA1,
-};
+/* PIC Constants */
+#define PIC1_COMMAND 0x20
+#define PIC1_DATA    0x21
+#define PIC2_COMMAND 0xA0
+#define PIC2_DATA    0xA1
+#define PIC_EOI      0x20
 
 static void syslog_write_hex(const char* label, uint64_t value) {
     char buffer[96];
@@ -67,73 +68,62 @@ static void halt_on_invalid(const char* message) {
 }
 
 static void pic_remap_and_mask(void) {
-    /* Masked remap to move IRQs off exception vectors. */
-
-    /* Start the initialization sequence (cascade, expect ICW4). */
+    /* Start initialization */
     outb(PIC1_COMMAND, 0x11);
+    io_wait();
     outb(PIC2_COMMAND, 0x11);
+    io_wait();
 
-    /* Set vector offsets to 0x20-0x2F. */
+    /* Remap to 0x20-0x2F */
     outb(PIC1_DATA, 0x20);
+    io_wait();
     outb(PIC2_DATA, 0x28);
+    io_wait();
 
-    /* Tell the master that a slave is on IRQ2, and the slave its cascade identity. */
+    /* Cascade setup */
     outb(PIC1_DATA, 0x04);
+    io_wait();
     outb(PIC2_DATA, 0x02);
+    io_wait();
 
-    /* Set 8086/88 (MCS-80/85) mode. */
+    /* 8086 mode */
     outb(PIC1_DATA, 0x01);
+    io_wait();
     outb(PIC2_DATA, 0x01);
+    io_wait();
 
-    /* Leave everything masked until real IRQ handlers exist. */
-    outb(PIC1_DATA, 0xFF);
+    /* 
+     * Masking:
+     * Master: 0xFD = 1111 1101 (Unmasks IRQ1 - Keyboard)
+     * Slave:  0xFF = 1111 1111 (Masks all)
+     */
+    outb(PIC1_DATA, 0xFD);
     outb(PIC2_DATA, 0xFF);
 
-    syslog_write("PIC remapped to 0x20/0x28 and masked");
+    syslog_write("PIC remapped (0x20/0x28) and IRQ1 unmasked");
 }
 
-static void pic_send_eoi(uint8_t vector) {
-    const uint8_t irq = (uint8_t)(vector - 0x20);
+void interrupts_enable_irq(uint8_t irq) {
+    uint16_t port;
+    uint8_t value;
 
-    if (irq >= 8) {
-        outb(PIC2_COMMAND, 0x20);
+    if (irq < 8) {
+        port = PIC1_DATA;
+    } else {
+        port = PIC2_DATA;
+        irq -= 8;
     }
-    outb(PIC1_COMMAND, 0x20);
+
+    value = inb(port) & ~(1 << irq);
+    outb(port, value);
 }
 
 static const char* const EXCEPTION_NAMES[] = {
-    "Divide-by-zero",
-    "Debug",
-    "Non-maskable interrupt",
-    "Breakpoint",
-    "Overflow",
-    "Bound range exceeded",
-    "Invalid opcode",
-    "Device not available",
-    "Double fault",
-    "Coprocessor segment overrun",
-    "Invalid TSS",
-    "Segment not present",
-    "Stack fault",
-    "General protection",
-    "Page fault",
-    "Reserved",
-    "x87 floating point",
-    "Alignment check",
-    "Machine check",
-    "SIMD floating point",
-    "Virtualization",
-    "Control protection",
-    "Reserved",
-    "Reserved",
-    "Reserved",
-    "Reserved",
-    "Reserved",
-    "Reserved",
-    "Reserved",
-    "Reserved",
-    "Reserved",
-    "Reserved",
+    "Divide-by-zero", "Debug", "NMI", "Breakpoint", "Overflow", 
+    "Bound Range", "Invalid Opcode", "Device NA", "Double Fault", 
+    "Coprocessor", "Invalid TSS", "Segment NP", "Stack Fault", 
+    "GP Fault", "Page Fault", "Reserved", "x87 FPU", "Alignment", 
+    "Machine Check", "SIMD FPU", "Virtualization", "Control Prot"
 };
 
 #define VGA_COLUMNS 80
@@ -174,12 +164,8 @@ static void panic_write_hex_line(const char* label, uint64_t value) {
         buffer[index] = label[index];
         index++;
     }
-    if (index < sizeof(buffer) - 1) {
-        buffer[index++] = '0';
-    }
-    if (index < sizeof(buffer) - 1) {
-        buffer[index++] = 'x';
-    }
+    if (index < sizeof(buffer) - 1) buffer[index++] = '0';
+    if (index < sizeof(buffer) - 1) buffer[index++] = 'x';
     for (int shift = 60; shift >= 0 && index < sizeof(buffer) - 1; shift -= 4) {
         uint8_t nibble = (uint8_t)((value >> shift) & 0xF);
         buffer[index++] = (char)(nibble < 10 ? ('0' + nibble) : ('A' + (nibble - 10)));
@@ -189,46 +175,16 @@ static void panic_write_hex_line(const char* label, uint64_t value) {
 }
 
 static void panic_write_vector_line(uint8_t vector) {
-    const char* name = (vector < (sizeof(EXCEPTION_NAMES) / sizeof(EXCEPTION_NAMES[0])))
-                           ? EXCEPTION_NAMES[vector]
-                           : "Reserved";
-    char buffer[80];
-    size_t index = 0;
-    const char prefix[] = "Vector 0x";
-    while (index < sizeof(prefix) - 1 && index < sizeof(buffer) - 1) {
-        buffer[index] = prefix[index];
-        index++;
-    }
-    uint8_t high = (uint8_t)((vector >> 4) & 0xF);
-    uint8_t low = (uint8_t)(vector & 0xF);
-    if (index < sizeof(buffer) - 1) {
-        buffer[index++] = (char)(high < 10 ? ('0' + high) : ('A' + (high - 10)));
-    }
-    if (index < sizeof(buffer) - 1) {
-        buffer[index++] = (char)(low < 10 ? ('0' + low) : ('A' + (low - 10)));
-    }
-    if (index < sizeof(buffer) - 2) {
-        buffer[index++] = ' ';
-        buffer[index++] = '(';
-    }
-    size_t name_index = 0;
-    while (name[name_index] != '\0' && index < sizeof(buffer) - 1) {
-        buffer[index++] = name[name_index++];
-    }
-    if (index < sizeof(buffer) - 1) {
-        buffer[index++] = ')';
-    }
-    buffer[index] = '\0';
-    panic_write_line(buffer);
+    panic_write_hex_line("Exception Vector: ", vector);
 }
 
-static void exception_panic(uint8_t vector,
-                            uint64_t error_code,
-                            bool has_error_code,
-                            const struct interrupt_frame* frame) {
+static void exception_panic(uint8_t vector, uint64_t error_code, bool has_error_code, const struct interrupt_frame* frame) {
     panic_clear_screen();
     panic_write_line("!!! CPU EXCEPTION !!!");
     panic_write_vector_line(vector);
+    if (vector < sizeof(EXCEPTION_NAMES)/sizeof(char*)) {
+        panic_write_line(EXCEPTION_NAMES[vector]);
+    }
     if (has_error_code) {
         panic_write_hex_line("Error code: ", error_code);
     }
@@ -237,30 +193,24 @@ static void exception_panic(uint8_t vector,
         panic_write_hex_line("CS: ", frame->cs);
         panic_write_hex_line("RFLAGS: ", frame->rflags);
         panic_write_hex_line("RSP: ", frame->rsp);
-        panic_write_hex_line("SS: ", frame->ss);
     }
     panic_write_line("System halted.");
-    for (;;) {
-        __asm__ volatile("cli; hlt");
-    }
+    for (;;) __asm__ volatile("cli; hlt");
 }
 
-#define DECLARE_NOERR_HANDLER(num)                                                               \
-    __attribute__((interrupt)) static void handler_##num(struct interrupt_frame* frame) {        \
-        exception_panic((uint8_t)(num), 0, false, frame);                                         \
+#define DECLARE_NOERR_HANDLER(num) \
+    __attribute__((interrupt)) static void handler_##num(struct interrupt_frame* frame) { \
+        exception_panic((uint8_t)(num), 0, false, frame); \
     }
 
-#define DECLARE_ERR_HANDLER(num)                                                                 \
-    __attribute__((interrupt)) static void handler_##num(struct interrupt_frame* frame,          \
-                                                         uint64_t error_code) {                  \
-        exception_panic((uint8_t)(num), error_code, true, frame);                                 \
+#define DECLARE_ERR_HANDLER(num) \
+    __attribute__((interrupt)) static void handler_##num(struct interrupt_frame* frame, uint64_t error_code) { \
+        exception_panic((uint8_t)(num), error_code, true, frame); \
     }
 
 DECLARE_NOERR_HANDLER(0);
 DECLARE_NOERR_HANDLER(1);
-__attribute__((interrupt)) static void handler_2(struct interrupt_frame* frame) {
-    (void)frame;
-}
+__attribute__((interrupt)) static void handler_2(struct interrupt_frame* frame) { (void)frame; }
 DECLARE_NOERR_HANDLER(3);
 DECLARE_NOERR_HANDLER(4);
 DECLARE_NOERR_HANDLER(5);
@@ -291,14 +241,28 @@ DECLARE_NOERR_HANDLER(29);
 DECLARE_NOERR_HANDLER(30);
 DECLARE_NOERR_HANDLER(31);
 
+/* Optimized Interrupt Handlers with direct EOI */
+
 __attribute__((interrupt)) static void handler_irq_master(struct interrupt_frame* frame) {
     (void)frame;
-    pic_send_eoi(0x20);
+    outb(PIC1_COMMAND, PIC_EOI);
 }
 
 __attribute__((interrupt)) static void handler_irq_slave(struct interrupt_frame* frame) {
     (void)frame;
-    pic_send_eoi(0x28);
+    outb(PIC2_COMMAND, PIC_EOI);
+    outb(PIC1_COMMAND, PIC_EOI);
+}
+
+__attribute__((interrupt)) static void handler_irq_keyboard(struct interrupt_frame* frame) {
+    (void)frame;
+    uint8_t scancode = inb(0x60);
+    
+    /* Acknowledge interrupt immediately to Master PIC */
+    outb(PIC1_COMMAND, PIC_EOI);
+    
+    /* Push to driver buffer */
+    keyboard_push_byte(scancode);
 }
 
 static void idt_set_gate(uint8_t vector, void* handler) {
@@ -368,22 +332,18 @@ void interrupts_init(void) {
         idt_set_gate(vector, handler_irq_slave);
     }
 
+    /* Override keyboard IRQ1 (0x21) */
+    idt_set_gate(0x21, handler_irq_keyboard);
+
     const struct idt_descriptor descriptor = {
         .limit = (uint16_t)(sizeof(g_idt) - 1),
         .base = (uint64_t)g_idt,
     };
 
     syslog_write_hex("IDT base: ", descriptor.base);
-    syslog_write_hex("IDT limit: ", descriptor.limit);
-    syslog_write_hex("Vector 8 selector: ", g_idt[8].selector);
-    syslog_write_hex("Vector 8 IST: ", g_idt[8].ist);
-
-    if (g_idt[8].selector != 0x08) {
-        halt_on_invalid("IDT vector 8 selector does not match kernel code segment; halting.");
-    }
-
-    if (g_idt[8].ist != 1) {
-        halt_on_invalid("IDT vector 8 IST index is not 1; halting.");
+    
+    if (g_idt[8].selector != 0x08 || g_idt[8].ist != 1) {
+        halt_on_invalid("Critical: IDT vector 8 misconfigured.");
     }
 
     __asm__ volatile("lidt %0" : : "m"(descriptor));
