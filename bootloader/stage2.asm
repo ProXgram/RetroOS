@@ -6,17 +6,22 @@
 BITS 16
 ORG 0x7E00
 
-CODE32_SEG equ 0x08
-DATA_SEG  equ 0x10
-CODE64_SEG equ 0x18
-KERNEL_DEST equ 0x00100000
-PROTECTED_STACK equ 0x0009F000
-LONG_STACK_TOP equ 0x001FF000
-PML4 equ 0x00009000
-PDPT equ 0x0000A000
-PD   equ 0x0000B000
-PD_HIGH equ 0x0000C000
-BOOT_INFO equ 0x00005000
+CODE32_SEG     equ 0x08
+DATA_SEG       equ 0x10
+CODE64_SEG     equ 0x18
+KERNEL_DEST    equ 0x00100000
+
+; Keep early allocations out of the payload region. Place them well above the
+; bootloader+kernel image that is staged at 0x7E00 before being copied to
+; 0x00100000. Using addresses in the 2–4 MiB range avoids clobbering the
+; payload while still being identity-mapped by the 1 GiB paging setup.
+PROTECTED_STACK equ 0x00280000
+LONG_STACK_TOP  equ 0x003FF000
+PML4            equ 0x00200000
+PDPT            equ 0x00201000
+PD              equ 0x00202000
+PD_HIGH         equ 0x00203000
+BOOT_INFO       equ 0x00005000
 
 stage2_start:
     cli
