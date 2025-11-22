@@ -27,10 +27,10 @@ DEPS := $(KERNEL_OBJS:.o=.d)
 
 QEMU ?= qemu-system-x86_64
 
-# QEMU Audio Flags: Try to force PC Speaker output
-# Note: On some modern QEMU versions/distros, you might need explicit audiodev flags like:
-# -audiodev pa,id=snd0 -machine pcspk-audiodev=snd0
-QEMU_AUDIO := -soundhw pcspk
+# QEMU Audio Flags: Modern QEMU (7.0+) uses -audiodev
+# We attempt to use PulseAudio ('pa') which works on Linux and WSLg.
+# If this fails, try changing 'pa' to 'sdl', 'alsa', or 'none'.
+QEMU_AUDIO := -machine pcspk-audiodev=snd0 -audiodev pa,id=snd0
 
 .PHONY: all clean run check-conflicts
 
