@@ -16,8 +16,8 @@
 #include "timer.h"
 #include "snake.h"
 #include "sound.h"
-#include "kstdio.h" // Added for kprintf
-#include "ata.h"    // Added for disk testing
+#include "kstdio.h" 
+#include "ata.h"    
 
 struct shell_command {
     const char* name;
@@ -48,14 +48,13 @@ static void command_shutdown(const char* args);
 static void command_time(const char* args);
 static void command_calc(const char* args);
 static void command_history(const char* args);
-static void command_palette(const char* args);
 
 static void command_uptime(const char* args);
 static void command_sleep(const char* args);
 
 static void command_snake(const char* args);
 static void command_beep(const char* args);
-static void command_disktest(const char* args); // New command
+static void command_disktest(const char* args);
 
 static void log_command_invocation(const char* command_name);
 
@@ -77,7 +76,6 @@ static const struct shell_command COMMANDS[] = {
     {"append", command_append, "Append text to a file"},
     {"rm", command_rm, "Remove a file"},
     {"history", command_history, "Show recent commands"},
-    {"palette", command_palette, "Display all VGA colors"},
     {"sysinfo", command_sysinfo, "Display hardware info"},
     {"memtest", command_memtest, "Run memory diagnostics"},
     {"logs", command_logs, "Show system logs"},
@@ -364,6 +362,10 @@ static void command_help(const char* args) {
         
         kprintf("- %s\n", COMMANDS[i].description);
     }
+    terminal_newline();
+    kprintf("Keys:\n");
+    kprintf("  PageUp / PageDown : Scroll terminal history\n");
+    kprintf("  Up / Down Arrow   : Scroll command history\n");
 }
 
 static void command_about(const char* args) {
@@ -484,10 +486,6 @@ static void command_hexdump(const char* args) {
         for (size_t j = 0; j < 16; j++) {
             if (i + j < size) {
                 unsigned char b = data[i + j];
-                // Replicating print_hex(b, 2) behavior manually via kprintf %x is tricky 
-                // because %x doesn't support width padding in our mini-implementation yet.
-                // We'll settle for raw hex or rely on a small logic.
-                // Actually, let's just print standard space separated.
                 if (b < 0x10) terminal_write_char('0');
                 kprintf("%x ", b);
             } else {
@@ -685,28 +683,6 @@ static void log_command_invocation(const char* command_name) {
     (void)command_name;
     // Use kprintf logging style here if we updated syslog, but keep simple for now
     syslog_write("Command executed");
-}
-
-static void command_palette(const char* args) {
-    (void)args;
-    uint8_t original_fg = 0, original_bg = 0;
-    terminal_getcolors(&original_fg, &original_bg);
-
-    kprintf("VGA palette codes:\n");
-    for (unsigned int i = 0; i < 16; i++) {
-        kprintf("  %u", i);
-        if (i < 10) kprintf(" ");
-        kprintf(" - %s", COLOR_NAMES[i]);
-        
-        size_t len = kstrlen(COLOR_NAMES[i]);
-        size_t pad = (len < 12) ? (12 - len) : 1;
-        while(pad--) terminal_write_char(' ');
-
-        terminal_setcolors((uint8_t)i, original_bg);
-        terminal_writestring("   "); // Swatch
-        terminal_setcolors(original_fg, original_bg);
-        terminal_newline();
-    }
 }
 
 static void command_echo(const char* args) {
