@@ -18,6 +18,7 @@ struct system_profile {
 };
 
 void system_cache_boot_info(const struct BootInfo* boot_info);
+void system_set_total_memory(uint32_t total_kb);
 const struct BootInfo* system_boot_info(void);
 const struct system_profile* system_profile_info(void);
 
