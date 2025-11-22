@@ -3,14 +3,14 @@
 #include "kstring.h"
 #include "os_info.h"
 #include "syslog.h"
-#include "ata.h"    // Added for persistence
+#include "ata.h"
 
 #define FS_STORAGE_LBA 2048
 #define FS_MAGIC_VAL   0xBA5EBA11
 
 static struct fs_file FILES[FS_MAX_FILES];
 
-// Helper to persist data
+// Helper to persist data to the disk
 static void fs_sync_to_disk(void) {
     if (!ata_init()) return; // Cannot sync if drive fails
 
@@ -22,7 +22,7 @@ static void fs_sync_to_disk(void) {
     // Write metadata (Magic Number) at FS_STORAGE_LBA
     // We use the first 4 bytes of a sector to store magic, rest is 0
     uint32_t magic_sector[128]; // 128 * 4 bytes = 512 bytes
-    for(int i=0; i<128; i++) magic_sector[i] = 0;
+    for (int i = 0; i < 128; i++) magic_sector[i] = 0;
     magic_sector[0] = FS_MAGIC_VAL;
     
     ata_write(FS_STORAGE_LBA, 1, (uint8_t*)magic_sector);
@@ -31,6 +31,7 @@ static void fs_sync_to_disk(void) {
     ata_write(FS_STORAGE_LBA + 1, sectors, (uint8_t*)FILES);
 }
 
+// Helper to load data from the disk
 static bool fs_load_from_disk(void) {
     if (!ata_init()) return false;
 
@@ -45,6 +46,16 @@ static bool fs_load_from_disk(void) {
     uint8_t sectors = (uint8_t)((total_bytes + 511) / 512);
     
     ata_read(FS_STORAGE_LBA + 1, sectors, (uint8_t*)FILES);
+
+    // Sanitize loaded data to prevent crashes if disk is corrupted
+    for (int i = 0; i < FS_MAX_FILES; i++) {
+        FILES[i].name[FS_MAX_FILENAME - 1] = '\0';
+        FILES[i].data[FS_MAX_FILE_SIZE - 1] = '\0';
+        if (FILES[i].size >= FS_MAX_FILE_SIZE) {
+            FILES[i].size = FS_MAX_FILE_SIZE - 1;
+        }
+    }
+
     return true;
 }
 
@@ -117,8 +128,8 @@ static struct fs_file* fs_allocate_slot(void) {
 }
 
 static bool fs_seed_file(const char* name, const char* contents) {
-    // Internal helper, does NOT trigger sync to avoid partial writes during init
-    // We call touch logic manually here
+    // Internal helper for initialization.
+    // Does NOT trigger immediate sync to allow batch initialization.
     struct fs_file* existing = fs_find_mutable(name);
     struct fs_file* target = existing;
 
@@ -228,7 +239,7 @@ bool fs_touch(const char* name) {
     slot->size = 0;
     slot->data[0] = '\0';
     
-    fs_sync_to_disk(); // Persist
+    fs_sync_to_disk();
     return true;
 }
 
@@ -249,6 +260,7 @@ bool fs_write(const char* name, const char* contents) {
 
     size_t length = kstrlen(contents);
     if (length >= FS_MAX_FILE_SIZE) {
+        // If the write fails due to size, and we just created it, cleanup.
         if (!existed) {
             fs_clear(file);
         }
@@ -261,7 +273,7 @@ bool fs_write(const char* name, const char* contents) {
     file->data[length] = '\0';
     file->size = length;
     
-    fs_sync_to_disk(); // Persist
+    fs_sync_to_disk();
     return true;
 }
 
@@ -294,7 +306,7 @@ bool fs_append(const char* name, const char* contents) {
     file->size += length;
     file->data[file->size] = '\0';
     
-    fs_sync_to_disk(); // Persist
+    fs_sync_to_disk();
     return true;
 }
 
@@ -305,16 +317,19 @@ bool fs_remove(const char* name) {
     }
 
     fs_clear(file);
-    fs_sync_to_disk(); // Persist
+    fs_sync_to_disk();
     return true;
 }
 
 static void fs_self_test(void) {
     const char* scratch = "__fs_self_test__";
     
-    // Clean slate for the test file
-    fs_remove(scratch);
+    // Ensure clean slate
+    struct fs_file* f = fs_find_mutable(scratch);
+    if (f) fs_clear(f);
     
+    // We intentionally perform these operations without checking success
+    // in the logs unless they fail, to keep boot output clean.
     if (!fs_touch(scratch)) {
         syslog_write("FS: self-test (touch) failed");
         return;
