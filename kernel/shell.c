@@ -14,8 +14,8 @@
 #include "syslog.h"
 #include "terminal.h"
 #include "timer.h"
-#include "snake.h" // <--- INCLUDE
-#include "sound.h" // <--- INCLUDE
+#include "snake.h"
+#include "sound.h"
 
 struct shell_command {
     const char* name;
