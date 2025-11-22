@@ -46,13 +46,13 @@ static void spawn_fruit(void) {
 }
 
 static void draw_point(int x, int y, char c, uint8_t fg, uint8_t bg) {
-    terminal_set_theme(fg, bg);
-    // We hack access via moving cursor and writing char for now,
-    // as terminal.c doesn't expose direct set_at_xy
+    // FIXED: Removed terminal_set_theme() call.
+    // calling terminal_* functions triggers a screen refresh from the text buffer,
+    // which overwrites the game graphics. We write directly to VRAM instead.
     
-    // WAIT! terminal_buffer is at 0xB8000. We can write directly!
     volatile uint16_t* vga = (volatile uint16_t*)0xB8000;
-    vga[y * SCREEN_W + x] = (uint16_t)c | ((uint16_t)(fg | (bg << 4)) << 8);
+    uint16_t attrib = (uint16_t)((bg << 4) | (fg & 0x0F));
+    vga[y * SCREEN_W + x] = (uint16_t)c | (attrib << 8);
 }
 
 void snake_game_run(void) {
