@@ -71,6 +71,8 @@ $(OS_IMAGE): $(BOOT_BIN) $(PAYLOAD_BIN)
 	if [ $$PADDING -gt 0 ]; then \
 		dd if=/dev/zero bs=1 count=$$PADDING >> $@ 2>/dev/null; \
 	fi
+	# Pad the image with 32MB of empty space to ensure FS LBA exists
+	dd if=/dev/zero bs=1M count=32 >> $@ 2>/dev/null
 
 clean:
 	rm -rf $(BUILD_DIR)
