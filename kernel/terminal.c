@@ -36,10 +36,7 @@ static size_t terminal_cols;
 static size_t terminal_rows;
 static size_t terminal_batch_depth;
 
-// Store char + color info (1 byte char, 1 byte color)
-// High byte = Color index (low nibble FG, high nibble BG)
-// Low byte = Char
-static uint16_t g_history[HISTORY_LINES * 200]; // Max 200 cols assumption
+static uint16_t g_history[HISTORY_LINES * 200];
 static size_t g_scroll_offset = 0;
 
 static inline uint16_t make_entry(char c, uint8_t fg, uint8_t bg) {
@@ -48,6 +45,9 @@ static inline uint16_t make_entry(char c, uint8_t fg, uint8_t bg) {
 }
 
 void terminal_initialize(uint32_t width, uint32_t height) {
+    (void)width;  // Mark unused
+    (void)height; // Mark unused
+
     graphics_init();
     
     // Calculate columns/rows based on font size
