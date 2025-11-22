@@ -3,6 +3,7 @@
 
 #include <stddef.h>
 #include <stdint.h>
+#include <stdbool.h>
 
 /*
  * Attempts to detect the amount of physical RAM available by probing
