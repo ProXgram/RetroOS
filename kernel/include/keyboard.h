@@ -15,7 +15,12 @@ void keyboard_init(void);
 /* Called by the interrupt handler (IRQ1) to push raw scancodes */
 void keyboard_push_byte(uint8_t byte);
 
+/* Blocking: Waits for a key */
 char keyboard_get_char(void);
+
+/* Non-Blocking: Returns character if available, or 0 if buffer empty */
+char keyboard_poll_char(void);
+
 void keyboard_read_line(char* buffer, size_t size);
 
 void keyboard_history_record(const char* line);
