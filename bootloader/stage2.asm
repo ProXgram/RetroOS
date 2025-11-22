@@ -15,6 +15,30 @@ KERNEL_DEST    equ 0x00100000
 ; bootloader+kernel image that is staged at 0x7E00 before being copied to
 ; 0x00100000. Using addresses in the 2–4 MiB range avoids clobbering the
 ; payload while still being identity-mapped by the 1 GiB paging setup.
+%ifndef PROTECTED_STACK
+PROTECTED_STACK equ 0x00280000
+%endif
+
+%ifndef LONG_STACK_TOP
+LONG_STACK_TOP  equ 0x003FF000
+%endif
+
+%ifndef PML4
+PML4            equ 0x00200000
+%endif
+
+%ifndef PDPT
+PDPT            equ 0x00201000
+%endif
+
+%ifndef PD
+PD              equ 0x00202000
+%endif
+
+%ifndef PD_HIGH
+PD_HIGH         equ 0x00203000
+%endif
+
 PROTECTED_STACK equ 0x00280000
 LONG_STACK_TOP  equ 0x003FF000
 PML4            equ 0x00200000
