@@ -6,6 +6,7 @@
 #include "fs.h"
 #include "keyboard.h"
 #include "kstring.h"
+#include "memtest.h"
 #include "os_info.h"
 #include "shell.h"
 #include "system.h"
@@ -33,6 +34,7 @@ static void command_append(const char* args);
 static void command_rm(const char* args);
 static void command_sysinfo(const char* args);
 static void command_logs(const char* args);
+static void command_memtest(const char* args);
 
 static void command_history(const char* args);
 static void command_palette(const char* args);
@@ -53,6 +55,7 @@ static const struct shell_command COMMANDS[] = {
     {"history", command_history, "Show recent commands"},
     {"palette", command_palette, "Display VGA color codes"},
     {"sysinfo", command_sysinfo, "Display hardware and memory info"},
+    {"memtest", command_memtest, "Run system memory diagnostics"},
     {"logs", command_logs, "Show the latest system logs"},
     {"echo", command_echo, "Display text back to you"},
 };
@@ -355,6 +358,11 @@ static void command_sysinfo(const char* args) {
     terminal_writestring("Architecture: ");
     terminal_writestring(profile->architecture);
     terminal_newline();
+}
+
+static void command_memtest(const char* args) {
+    (void)args;
+    memtest_run_diagnostic();
 }
 
 static void command_logs(const char* args) {
