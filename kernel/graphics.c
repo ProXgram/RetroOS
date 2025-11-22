@@ -1,5 +1,6 @@
 #include "graphics.h"
 #include <stddef.h>
+#include <stdbool.h>
 #include "system.h"
 
 static uint32_t* g_framebuffer = NULL;
@@ -113,10 +114,11 @@ void graphics_fill_rect(int x, int y, int w, int h, uint32_t color) {
 void graphics_draw_char(int x, int y, char c, uint32_t fg, uint32_t bg) {
     // Fallback for undefined chars (draw box)
     const uint8_t* glyph = FONT_8X8[0x20]; 
-    if (c >= 0 && c < 128) {
-        glyph = FONT_8X8[(int)c];
-        // Check if empty (assuming NUL is all zeros) and not NUL or Space
-        // Actually just trust the table lookup for now.
+    
+    // Cast to unsigned char to avoid signed comparison warnings and errors
+    unsigned char uc = (unsigned char)c;
+    if (uc < 128) {
+        glyph = FONT_8X8[uc];
     } else {
         // Unknown char
         glyph = FONT_8X8['?'];
