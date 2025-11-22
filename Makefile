@@ -27,6 +27,11 @@ DEPS := $(KERNEL_OBJS:.o=.d)
 
 QEMU ?= qemu-system-x86_64
 
+# QEMU Audio Flags: Try to force PC Speaker output
+# Note: On some modern QEMU versions/distros, you might need explicit audiodev flags like:
+# -audiodev pa,id=snd0 -machine pcspk-audiodev=snd0
+QEMU_AUDIO := -soundhw pcspk
+
 .PHONY: all clean run check-conflicts
 
 all: check-conflicts $(OS_IMAGE)
@@ -78,6 +83,8 @@ clean:
 	rm -rf $(BUILD_DIR)
 
 run: check-conflicts $(OS_IMAGE)
-	$(QEMU) $(if $(HEADLESS),-display none -serial mon:stdio,) -drive format=raw,file=$(OS_IMAGE)
+	$(QEMU) $(if $(HEADLESS),-display none -serial mon:stdio,) \
+		$(QEMU_AUDIO) \
+		-drive format=raw,file=$(OS_IMAGE)
 
 -include $(DEPS)
