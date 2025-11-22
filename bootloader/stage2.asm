@@ -11,6 +11,16 @@ DATA_SEG       equ 0x10
 CODE64_SEG     equ 0x18
 KERNEL_DEST    equ 0x00100000
 
+; Keep early allocations out of the payload region. Place them well above the
+; bootloader+kernel image that is staged at 0x7E00 before being copied to
+; 0x00100000. Using addresses in the 2–4 MiB range avoids clobbering the
+; payload while still being identity-mapped by the 1 GiB paging setup.
+PROTECTED_STACK equ 0x00280000
+LONG_STACK_TOP  equ 0x003FF000
+PML4            equ 0x00200000
+PDPT            equ 0x00201000
+PD              equ 0x00202000
+PD_HIGH         equ 0x00203000
 ; Keep early allocations above the bootloader+kernel payload so they do not
 ; trample the copied kernel bytes before the handoff to long mode.
 PROTECTED_STACK equ 0x00080000
