@@ -1,6 +1,8 @@
 #ifndef PAGING_H
 #define PAGING_H
 
-void paging_init(void);
+#include "system.h"
+
+void paging_init(const struct BootInfo* boot_info);
 
 #endif /* PAGING_H */
