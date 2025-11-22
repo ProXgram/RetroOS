@@ -16,8 +16,8 @@
 #include "timer.h"
 #include "snake.h"
 #include "sound.h"
-#include "kstdio.h" 
-#include "ata.h"    
+#include "kstdio.h" // Added for kprintf
+#include "ata.h"    // Added for disk testing
 
 struct shell_command {
     const char* name;
@@ -682,6 +682,7 @@ static void command_shutdown(const char* args) {
 }
 
 static void log_command_invocation(const char* command_name) {
+    (void)command_name;
     // Use kprintf logging style here if we updated syslog, but keep simple for now
     syslog_write("Command executed");
 }
