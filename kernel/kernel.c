@@ -9,6 +9,7 @@
 #include "syslog.h"
 #include "terminal.h"
 #include "keyboard.h"
+#include "timer.h"  
 
 static void boot_sequence(const struct BootInfo* boot_info) {
     syslog_write("Boot: entered kernel");
@@ -28,6 +29,7 @@ static void boot_sequence(const struct BootInfo* boot_info) {
     fs_init();
     syslog_write("Boot: virtual filesystem mounted");
 
+    timer_init();  
     keyboard_init();
 }
 
