@@ -140,5 +140,33 @@ void graphics_draw_char(int x, int y, char c, uint32_t fg, uint32_t bg) {
     }
 }
 
+void graphics_draw_char_scaled(int x, int y, char c, uint32_t fg, uint32_t bg, int scale) {
+    if (scale < 1) scale = 1;
+    
+    unsigned char uc = (unsigned char)c;
+    const uint8_t* glyph = (uc < 128) ? FONT_8X8[uc] : FONT_8X8['?'];
+
+    for (int row = 0; row < 8; row++) {
+        uint8_t bits = glyph[row];
+        for (int col = 0; col < 8; col++) {
+            bool on = (bits >> (7 - col)) & 1;
+            uint32_t color = on ? fg : bg;
+            
+            // Only draw if it's foreground, OR if background is opaque (assuming bg != 0 for now)
+            // But usually we want to draw the BG block too for blocky feel.
+            graphics_fill_rect(x + (col * scale), y + (row * scale), scale, scale, color);
+        }
+    }
+}
+
+void graphics_draw_string_scaled(int x, int y, const char* str, uint32_t fg, uint32_t bg, int scale) {
+    int cur_x = x;
+    while (*str) {
+        graphics_draw_char_scaled(cur_x, y, *str, fg, bg, scale);
+        cur_x += 8 * scale;
+        str++;
+    }
+}
+
 uint32_t graphics_get_width(void) { return g_width; }
 uint32_t graphics_get_height(void) { return g_height; }
