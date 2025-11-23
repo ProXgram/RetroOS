@@ -20,7 +20,13 @@ void background_render(void) {
     terminal_begin_batch();
     // Set terminal colors to White on Blue for the header text feel
     terminal_setcolors(0x0F, 0x01); 
+    
+    // Clear the screen cleanly before setting the margin
     terminal_clear(); 
+
+    // Reserve the header area so terminal output flows underneath the banner
+    // We reserve rows 0 to 10. Row 11 is the border line, which we allow.
+    terminal_set_margin_top(HEADER_ROWS - 1);
     
     // Draw simple white lines for a clean, professional look
     const char* border = "________________________________________________________________________________";
