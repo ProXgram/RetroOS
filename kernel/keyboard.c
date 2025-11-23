@@ -158,7 +158,6 @@ static char translate_scancode(uint8_t scancode) {
 }
 
 /* --- History System --- */
-// (Keeping existing implementation details for history as is)
 static size_t history_start_idx(void) {
     return (g_history_count > KEYBOARD_HISTORY_LIMIT) ? 
            (g_history_count - KEYBOARD_HISTORY_LIMIT) : 0;
@@ -296,6 +295,10 @@ char keyboard_poll_char(void) {
 }
 
 void keyboard_read_line(char* buffer, size_t size) {
+    keyboard_read_line_ex(buffer, size, NULL);
+}
+
+void keyboard_read_line_ex(char* buffer, size_t size, keyboard_idle_callback_t on_idle) {
     if (size == 0) return;
     
     size_t len = 0;
@@ -304,7 +307,16 @@ void keyboard_read_line(char* buffer, size_t size) {
     keyboard_history_reset_iteration();
 
     for (;;) {
-        uint16_t raw = keyboard_read_scancode();
+        // Polling loop
+        uint16_t raw = 0;
+        while (!keyboard_poll_scancode(&raw)) {
+            if (on_idle) on_idle();
+            // Short busy-wait to avoid spamming the callback too hard if polling is fast
+            // In a real OS we'd sleep, but here we likely rely on HLT in the interrupt handler?
+            // Since we are polling a buffer, we can just spin lightly.
+            // __asm__ volatile("hlt"); // Wait for next IRQ
+        }
+
         bool released = (raw & SCANCODE_RELEASE_MASK);
         bool extended = (raw & SCANCODE_EXTENDED_MASK);
         uint8_t scan = raw & 0x7F;
