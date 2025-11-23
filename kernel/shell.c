@@ -462,6 +462,9 @@ static void command_cat(const char* args) {
     terminal_newline();
 }
 
+static void shell_idle_task(void) {
+    background_animate();
+
 static void command_hexdump(const char* args) {
     char filename[FS_MAX_FILENAME];
     if (!parse_filename_token(args, filename, sizeof(filename), NULL)) {
