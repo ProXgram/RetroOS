@@ -18,7 +18,7 @@
 #include "sound.h"
 #include "kstdio.h" 
 #include "ata.h"    
-#include "banner.h" // Added banner include
+#include "banner.h"
 
 struct shell_command {
     const char* name;
@@ -56,7 +56,7 @@ static void command_sleep(const char* args);
 static void command_snake(const char* args);
 static void command_beep(const char* args);
 static void command_disktest(const char* args);
-static void command_banner(const char* args); // Added prototype
+static void command_banner(const char* args);
 
 static void log_command_invocation(const char* command_name);
 
@@ -64,7 +64,7 @@ static const struct shell_command COMMANDS[] = {
     {"help", command_help, "Show this help message"},
     {"about", command_about, "Learn more about " OS_NAME},
     {"clear", command_clear, "Clear the screen"},
-    {"banner", command_banner, "Show moving banner screensaver"}, // Added command
+    {"banner", command_banner, "Show moving banner screensaver"},
     {"time", command_time, "Show current RTC date/time"},
     {"uptime", command_uptime, "Show time since boot"},  
     {"sleep", command_sleep, "Pause for N seconds"},     
@@ -731,6 +731,11 @@ static void execute_command(const char* input) {
 void shell_run(void) {
     char input[INPUT_CAPACITY];
     sound_init();
+    
+    // Automatically start the banner animation at boot
+    // Waits for user keypress to continue
+    banner_run();
+
     shell_print_banner();
 
     for (;;) {
