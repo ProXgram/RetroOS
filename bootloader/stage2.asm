@@ -59,12 +59,12 @@ stage2_start:
     cmp ax, 0x004F
     jne .find_mode
 
-    ; Look for 1024x768x32
+    ; Look for 800x600x32 (Changed from 1024x768 to make things appear larger)
     mov ax, [MODE_INFO_ADDR + 18]
-    cmp ax, 1024
+    cmp ax, 800
     jne .find_mode
     mov ax, [MODE_INFO_ADDR + 20]
-    cmp ax, 768
+    cmp ax, 600
     jne .find_mode
     mov al, [MODE_INFO_ADDR + 25]
     cmp al, 32
