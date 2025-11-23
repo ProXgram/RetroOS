@@ -35,6 +35,7 @@ static uint8_t terminal_color_bg;
 static size_t terminal_cols;
 static size_t terminal_rows;
 static size_t terminal_batch_depth;
+static size_t terminal_margin_top = 0; // Number of rows to skip drawing at the top
 
 static uint16_t g_history[HISTORY_LINES * 200];
 static size_t g_scroll_offset = 0;
@@ -63,8 +64,13 @@ void terminal_initialize(uint32_t width, uint32_t height) {
     terminal_color_bg = 1;  // Blue
     g_scroll_offset = 0;
     terminal_batch_depth = 0;
+    terminal_margin_top = 0;
 
     terminal_clear();
+}
+
+void terminal_set_margin_top(size_t rows) {
+    terminal_margin_top = rows;
 }
 
 static void terminal_refresh_screen(void) {
@@ -80,6 +86,10 @@ static void terminal_refresh_screen(void) {
     start_row -= g_scroll_offset;
 
     for (size_t y = 0; y < view_h; y++) {
+        // FIX: Skip drawing if this row is inside the reserved top margin.
+        // This prevents the terminal from overwriting the graphical banner.
+        if (y < terminal_margin_top) continue;
+
         for (size_t x = 0; x < terminal_cols; x++) {
             size_t hist_idx = (start_row + y) * terminal_cols + x;
             uint16_t entry = g_history[hist_idx];
@@ -98,7 +108,10 @@ static void terminal_refresh_screen(void) {
     // Draw cursor
     if (g_scroll_offset == 0) {
         size_t cur_y = (terminal_row >= view_h) ? (view_h - 1) : terminal_row;
-        graphics_fill_rect(terminal_column * FONT_W, cur_y * FONT_H + (FONT_H-2), FONT_W, 2, VGA_PALETTE[terminal_color_fg]);
+        // Only draw cursor if it's outside margin
+        if (cur_y >= terminal_margin_top) {
+            graphics_fill_rect(terminal_column * FONT_W, cur_y * FONT_H + (FONT_H-2), FONT_W, 2, VGA_PALETTE[terminal_color_fg]);
+        }
     }
 }
 
