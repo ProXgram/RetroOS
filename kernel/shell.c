@@ -462,9 +462,6 @@ static void command_cat(const char* args) {
     terminal_newline();
 }
 
-static void shell_idle_task(void) {
-    background_animate();
-
 static void command_hexdump(const char* args) {
     char filename[FS_MAX_FILENAME];
     if (!parse_filename_token(args, filename, sizeof(filename), NULL)) {
@@ -687,6 +684,10 @@ static void command_shutdown(const char* args) {
 
 static void command_banner(const char* args) {
     (void)args;
+    kprintf("Starting banner... Press any key to exit.\n");
+    // Wait briefly to ensure the 'Enter' key release doesn't interfere
+    // and to let the user read the message.
+    timer_wait(50); // 0.5 seconds
     banner_run();
     shell_print_banner();
 }
@@ -731,19 +732,20 @@ static void execute_command(const char* input) {
     kprintf("Unknown command. Type 'help'.\n");
 }
 
+// --- THIS IS THE NEW IDLE TASK ---
+static void shell_idle_task(void) {
+    background_animate();
+}
+
 void shell_run(void) {
     char input[INPUT_CAPACITY];
     sound_init();
-    
-    // Automatically start the banner animation at boot
-    // Waits for user keypress to continue
-    banner_run();
-
     shell_print_banner();
 
     for (;;) {
         shell_print_prompt();
-        keyboard_read_line(input, sizeof(input));
+        // Passed 'shell_idle_task' here so the banner moves while typing
+        keyboard_read_line_ex(input, sizeof(input), shell_idle_task);
         execute_command(input);
     }
 }
