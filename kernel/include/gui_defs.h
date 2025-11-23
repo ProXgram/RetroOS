@@ -12,6 +12,7 @@
 // --- Colors (Aero Basic) ---
 #define COL_DESKTOP     0xFF2D73A8
 #define COL_TASKBAR     0xFF18334E
+#define COL_START_BTN   0xFF1F4E79
 #define COL_WIN_ACTIVE  0xFF6B95BD
 #define COL_WIN_INACT   0xFF888888
 #define COL_WIN_BODY    0xFFF0F0F0
