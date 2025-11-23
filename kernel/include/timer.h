@@ -6,14 +6,12 @@
 void timer_init(void);
 void timer_phase(int hz);
 void timer_handler(void);
-
-/* Wait for a specific amount of ticks */
 void timer_wait(int ticks);
-
-/* Get total ticks since boot */
 uint64_t timer_get_ticks(void);
-
-/* Get seconds since boot */
 uint64_t timer_get_uptime(void);
+
+// Callback typedef
+typedef void (*timer_callback_t)(void);
+void timer_set_callback(timer_callback_t callback);
 
 #endif
