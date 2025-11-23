@@ -1,8 +1,6 @@
 # NostaluxOS
 
-NostaluxOS is a small x86-64 hobby operating system: it boots straight to a VGA text console,
-shows a retro banner, and drops you into a built-in shell. The goal is to keep the code approachable while capturing the golden period of
-classic PCs.
+NostaluxOS is a small x86-64 hobby operating system
 
 This is my first operating-system project, there has been some heavy codex use but I have phased out of it as of 11/22/2025
 
