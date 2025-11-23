@@ -5,6 +5,7 @@
 #include "terminal.h"
 #include "background.h"
 #include "kstring.h"
+#include "syslog.h"
 
 // Helper to draw a string at specific pixel coordinates directly to the framebuffer
 static void draw_string_px(int x, int y, const char* str, uint32_t fg, uint32_t bg) {
@@ -16,21 +17,53 @@ static void draw_string_px(int x, int y, const char* str, uint32_t fg, uint32_t 
     }
 }
 
+// The big banner ASCII art
+static const char* BIG_BANNER[] = {
+    " _   _           _        _             ____   _____                           ",
+    "| \\ | |         | |      | |           / __ \\ / ____|                          ",
+    "|  \\| | ___  ___| |_ __ _| |_   ___  _| |  | | (___   NOSTALUX                 ",
+    "| . ` |/ _ \\ / __| __/ _` | | | | \\ \\/ / |  | |\\___ \\                         ",
+    "| |\\  | (_) \\__ \\ || (_| | | |_| |>  <| |__| |____) |                        ",
+    "|_| \\_|\\___/|___/\\__\\__,_|_|\\__,_/_/\\_\\\\____/|_____/                         ",
+};
+static const int BANNER_LINE_COUNT = 6;
+
+static void draw_big_banner(int x, int y, uint32_t fg, uint32_t bg) {
+    for (int i = 0; i < BANNER_LINE_COUNT; i++) {
+        draw_string_px(x, y + (i * 8), BIG_BANNER[i], fg, bg);
+    }
+}
+
 void banner_run(void) {
+    syslog_write("Banner: Starting big animation...");
+    
+    // Flush pending input
+    for (int i = 0; i < 10; i++) {
+        if (keyboard_poll_char() == 0) break;
+    }
+
     int width = (int)graphics_get_width();
     int height = (int)graphics_get_height();
     
-    const char* text = "NOSTALUX OS";
-    int text_len_px = (int)kstrlen(text) * 8; 
-    int text_h_px = 8;
+    if (width == 0 || height == 0) return;
+
+    // Calculate dimensions
+    int banner_w_chars = 0;
+    for (int i = 0; i < BANNER_LINE_COUNT; i++) {
+        int len = (int)kstrlen(BIG_BANNER[i]);
+        if (len > banner_w_chars) banner_w_chars = len;
+    }
+    
+    int obj_w = banner_w_chars * 8;
+    int obj_h = BANNER_LINE_COUNT * 8;
     
     // Start in center
-    int x = width / 2 - text_len_px / 2;
-    int y = height / 2 - text_h_px / 2;
+    int x = width / 2 - obj_w / 2;
+    int y = height / 2 - obj_h / 2;
     
     // Velocity
-    int dx = 3;
-    int dy = 3;
+    int dx = 2;
+    int dy = 2;
     
     // Bouncing colors
     uint32_t colors[] = {
@@ -47,31 +80,28 @@ void banner_run(void) {
     uint32_t current_color = colors[0];
     uint32_t bg_color = 0xFF000000; // Black
 
-    // Clear screen initially
+    // Clear screen
     graphics_fill_rect(0, 0, width, height, bg_color);
     
     while (true) {
-        // Exit on keypress
-        if (keyboard_poll_char()) {
-            break;
-        }
+        if (keyboard_poll_char() != 0) break;
         
-        // Erase old text position
-        graphics_fill_rect(x, y, text_len_px, text_h_px, bg_color);
+        // Erase old position
+        graphics_fill_rect(x, y, obj_w, obj_h, bg_color);
         
-        // Update position
+        // Update
         x += dx;
         y += dy;
         
-        // Collision detection and bouncing
+        // Bounce
         bool bounced = false;
         
         if (x <= 0) {
             x = 0;
             dx = -dx;
             bounced = true;
-        } else if (x + text_len_px >= width) {
-            x = width - text_len_px;
+        } else if (x + obj_w >= width) {
+            x = width - obj_w;
             dx = -dx;
             bounced = true;
         }
@@ -80,25 +110,23 @@ void banner_run(void) {
             y = 0;
             dy = -dy;
             bounced = true;
-        } else if (y + text_h_px >= height) {
-            y = height - text_h_px;
+        } else if (y + obj_h >= height) {
+            y = height - obj_h;
             dy = -dy;
             bounced = true;
         }
         
-        // Change color on bounce
         if (bounced) {
             color_idx = (color_idx + 1) % color_count;
             current_color = colors[color_idx];
         }
         
-        // Draw text at new position
-        draw_string_px(x, y, text, current_color, bg_color);
+        // Draw
+        draw_big_banner(x, y, current_color, bg_color);
         
-        // Wait ~20ms (2 ticks at 100Hz)
+        // Wait
         timer_wait(2);
     }
     
-    // Restore the standard UI background before returning to shell
     background_render();
 }
