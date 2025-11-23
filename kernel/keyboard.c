@@ -311,10 +311,10 @@ void keyboard_read_line_ex(char* buffer, size_t size, keyboard_idle_callback_t o
         uint16_t raw = 0;
         while (!keyboard_poll_scancode(&raw)) {
             if (on_idle) on_idle();
-            // Short busy-wait to avoid spamming the callback too hard if polling is fast
-            // In a real OS we'd sleep, but here we likely rely on HLT in the interrupt handler?
-            // Since we are polling a buffer, we can just spin lightly.
-            // __asm__ volatile("hlt"); // Wait for next IRQ
+            
+            // Wait for interrupt (Timer IRQ 100Hz or Keyboard IRQ)
+            // This prevents the CPU from spinning at 100% and running animations too fast
+            __asm__ volatile("hlt"); 
         }
 
         bool released = (raw & SCANCODE_RELEASE_MASK);
