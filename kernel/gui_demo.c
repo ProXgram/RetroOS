@@ -6,40 +6,40 @@
 #include "syslog.h"
 #include "kstring.h"
 #include "io.h"
+#include "kstdio.h" // For sprintf-style formatting if available, else manual
 #include <stdbool.h>
 
 // --- Configuration ---
-#define MAX_WINDOWS 8
-#define MAX_ICONS 4
-#define WIN_CAPTION_H 24
-#define TASKBAR_H 36
+#define MAX_WINDOWS 4
+#define WIN_CAPTION_H 26
+#define TASKBAR_H 32
 
-// --- Windows 7 / Aero Basic Hybrid Theme ---
-#define COL_DESKTOP     0xFF2D73A8 // Win7 Default Wallpaper Blue
-#define COL_TASKBAR     0xFF18334E // Glassy Dark Blue
-#define COL_START_BTN   0xFF1F4E79 // Orb-ish Blue
-#define COL_WIN_BORDER  0xFF6B95BD // Aero Basic Blue
-#define COL_WIN_TITLE   0xFF000000 // Black Text
-#define COL_WIN_BODY    0xFFF0F0F0 // Clean White/Grey
+// --- Theme Colors (Windows 7 Basic / Aero-ish) ---
+#define COL_DESKTOP     0xFF2D73A8
+#define COL_TASKBAR     0xFF18334E
+#define COL_START_BTN   0xFF1F4E79
+#define COL_START_HOVER 0xFF3465A4
+#define COL_WIN_ACTIVE  0xFF6B95BD
+#define COL_WIN_INACT   0xFF888888
+#define COL_WIN_BODY    0xFFF0F0F0
 #define COL_BTN_HOVER   0xFF4F81BD
 #define COL_WHITE       0xFFFFFFFF
 #define COL_BLACK       0xFF000000
-#define COL_RED         0xFFE81123 // Close Button Red
-#define COL_HIGHLIGHT   0x40FFFFFF // Simulated alpha highlight (just a lighter color logic in drawing)
+#define COL_RED         0xFFE81123
+#define COL_TEXT_SHADOW 0xFF000000
+
+// --- Application Types ---
+typedef enum {
+    APP_NONE,
+    APP_WELCOME,
+    APP_NOTEPAD,
+    APP_CALC
+} AppType;
 
 // --- Structures ---
-
-typedef enum {
-    WIN_NONE = 0,
-    WIN_WELCOME,
-    WIN_ABOUT,
-    WIN_CALC,
-    WIN_NOTEPAD
-} WindowType;
-
 typedef struct {
     int id;
-    WindowType type;
+    AppType type;
     char title[32];
     int x, y, w, h;
     bool visible;
@@ -47,15 +47,11 @@ typedef struct {
     bool dragging;
     int drag_off_x;
     int drag_off_y;
-    // Z-order is implicit by array index (higher index = on top)
+    
+    // App Specific State
+    char text_buffer[128]; // For Notepad
+    int text_len;
 } Window;
-
-typedef struct {
-    char label[16];
-    int x, y;
-    WindowType action_type;
-    bool selected;
-} Icon;
 
 typedef struct {
     bool open;
@@ -64,462 +60,430 @@ typedef struct {
 
 // --- Global State ---
 static Window windows[MAX_WINDOWS];
-static Icon icons[MAX_ICONS];
 static StartMenu start_menu;
 static MouseState mouse;
 static MouseState prev_mouse;
 static int screen_w, screen_h;
+static int focused_win_idx = -1;
 
 // --- Helpers ---
-
-// Move window at index 'idx' to the end of the array (render last = top)
-static void bring_to_front(int idx) {
-    if (idx < 0 || idx >= MAX_WINDOWS - 1) return;
-    // If it's already last active? We need to bubble it up.
-    // Simple approach: rotate the array entries from idx to end.
-    Window temp = windows[idx];
-    for (int i = idx; i < MAX_WINDOWS - 1; i++) {
-        windows[i] = windows[i+1];
-    }
-    windows[MAX_WINDOWS - 1] = temp;
-}
 
 static bool point_in_rect(int px, int py, int rx, int ry, int rw, int rh) {
     return (px >= rx && px < rx + rw && py >= ry && py < ry + rh);
 }
 
-// --- IO Helpers ---
-static void sys_shutdown(void) {
-    outw(0x604, 0x2000);
-    outw(0xB004, 0x2000);
-    outw(0x4004, 0x3400);
+static void bring_to_front(int idx) {
+    if (idx < 0 || idx >= MAX_WINDOWS) return;
+    // Simple swap to end? No, shift array.
+    // We want windows[idx] to move to windows[MAX_WINDOWS-1] (top)
+    // But we need to preserve order of others.
+    // For simplicity in this demo: We just mark it focused. 
+    // True Z-order requires a separate list of pointers or indices.
+    // We will just update the `focused_win_idx` and draw the focused one LAST.
+    focused_win_idx = idx;
 }
 
-static void sys_reboot(void) {
-    uint8_t temp = 0x02;
-    while (temp & 0x02) temp = inb(0x64);
-    outb(0x64, 0xFE);
+static void int_to_str(int v, char* buf) {
+    if (v == 0) { buf[0] = '0'; buf[1] = 0; return; }
+    int i = 0;
+    int n = v;
+    char tmp[16];
+    while (n > 0) { tmp[i++] = '0' + (n % 10); n /= 10; }
+    int j = 0;
+    while (i > 0) buf[j++] = tmp[--i];
+    buf[j] = 0;
 }
 
 // --- Initialization ---
 
-static void init_gui_system(void) {
+static void init_window(int idx, AppType type, const char* title, int x, int y, int w, int h) {
+    windows[idx].id = idx;
+    windows[idx].type = type;
+    // Manual strcpy
+    for(int i=0; i<32; i++) {
+        windows[idx].title[i] = title[i];
+        if (title[i] == 0) break;
+    }
+    windows[idx].x = x;
+    windows[idx].y = y;
+    windows[idx].w = w;
+    windows[idx].h = h;
+    windows[idx].visible = true;
+    windows[idx].minimized = false;
+    windows[idx].dragging = false;
+    windows[idx].text_len = 0;
+    windows[idx].text_buffer[0] = 0;
+}
+
+static void gui_init(void) {
     screen_w = graphics_get_width();
     screen_h = graphics_get_height();
     
-    // Clear Windows
-    for (int i = 0; i < MAX_WINDOWS; i++) {
-        windows[i].id = i;
-        windows[i].visible = false;
-        windows[i].type = WIN_NONE;
-    }
-
-    // Default Window: Welcome
-    int w_idx = MAX_WINDOWS - 1; // Topmost
-    windows[w_idx].type = WIN_WELCOME;
-    windows[w_idx].visible = true;
-    windows[w_idx].x = (screen_w - 300) / 2;
-    windows[w_idx].y = (screen_h - 200) / 2;
-    windows[w_idx].w = 300;
-    windows[w_idx].h = 200;
-    // Manual strcpy
-    const char* t1 = "Welcome";
-    for(int i=0; t1[i]; i++) windows[w_idx].title[i] = t1[i];
-
-    // Setup Icons
-    icons[0].x = 20; icons[0].y = 20;
-    const char* l1 = "My Computer";
-    for(int i=0; l1[i]; i++) icons[0].label[i] = l1[i];
-    icons[0].action_type = WIN_ABOUT;
-
-    icons[1].x = 20; icons[1].y = 100;
-    const char* l2 = "Notepad";
-    for(int i=0; l2[i]; i++) icons[1].label[i] = l2[i];
-    icons[1].action_type = WIN_NOTEPAD;
-
-    icons[2].x = 20; icons[2].y = 180;
-    const char* l3 = "Calculator";
-    for(int i=0; l3[i]; i++) icons[2].label[i] = l3[i];
-    icons[2].action_type = WIN_CALC;
-
-    // Start Menu
-    start_menu.open = false;
-    start_menu.w = 160;
-    start_menu.h = 220;
+    // Taskbar
+    start_menu.w = 180;
+    start_menu.h = 240;
     start_menu.x = 0;
     start_menu.y = screen_h - TASKBAR_H - start_menu.h;
+    start_menu.open = false;
+
+    // Clear windows
+    for(int i=0; i<MAX_WINDOWS; i++) windows[i].visible = false;
+
+    // Spawn Defaults
+    init_window(0, APP_WELCOME, "Welcome", 50, 50, 300, 180);
+    init_window(1, APP_NOTEPAD, "Notepad", 400, 80, 250, 200);
+    init_window(2, APP_CALC,    "Calc",    100, 300, 160, 220);
+    
+    focused_win_idx = 0;
 }
 
-static void spawn_window(WindowType type) {
-    // Check if already open, if so, bring to front and restore
-    for (int i = 0; i < MAX_WINDOWS; i++) {
-        if (windows[i].visible && windows[i].type == type) {
-            windows[i].minimized = false;
-            bring_to_front(i);
-            return;
-        }
-    }
+// --- Drawing ---
 
-    // Find empty slot (from bottom of stack)
-    int slot = -1;
-    for (int i = 0; i < MAX_WINDOWS; i++) {
-        if (!windows[i].visible) {
-            slot = i;
-            break;
-        }
-    }
-    if (slot == -1) slot = 0; // Overwrite bottom-most if full
-
-    // Initialize
-    Window* w = &windows[slot];
-    w->visible = true;
-    w->minimized = false;
-    w->type = type;
-    w->w = 300;
-    w->h = 200;
-    w->x = 50 + (slot * 20);
-    w->y = 50 + (slot * 20);
-    
-    // Set Title
-    const char* title = "Window";
-    if (type == WIN_ABOUT) title = "System Info";
-    if (type == WIN_CALC) title = "Calculator";
-    if (type == WIN_NOTEPAD) title = "Notepad";
-    
-    // Clear title buffer
-    for(int i=0; i<32; i++) w->title[i] = 0;
-    for(int i=0; title[i] && i<31; i++) w->title[i] = title[i];
-
-    bring_to_front(slot);
-}
-
-// --- Rendering ---
-
-static void draw_raised_rect(int x, int y, int w, int h, uint32_t col) {
+static void draw_rect(int x, int y, int w, int h, uint32_t col) {
     graphics_fill_rect(x, y, w, h, col);
-    graphics_fill_rect(x, y, w, 1, 0xFFFFFFFF); // Top Light
-    graphics_fill_rect(x, y, 1, h, 0xFFFFFFFF); // Left Light
-    graphics_fill_rect(x, y+h-1, w, 1, 0xFF000000); // Bot Shadow
-    graphics_fill_rect(x+w-1, y, 1, h, 0xFF000000); // Right Shadow
+}
+
+static void draw_button(int x, int y, int w, int h, const char* label, bool hover) {
+    uint32_t bg = hover ? COL_BTN_HOVER : 0xFFDDDDDD;
+    uint32_t border = 0xFF888888;
+    
+    draw_rect(x, y, w, h, bg);
+    draw_rect(x, y, w, 1, COL_WHITE);
+    draw_rect(x, y, 1, h, COL_WHITE);
+    draw_rect(x + w - 1, y, 1, h, border);
+    draw_rect(x, y + h - 1, w, 1, border);
+    
+    int len = kstrlen(label) * 8;
+    graphics_draw_string_scaled(x + (w - len)/2, y + (h - 8)/2, label, COL_BLACK, bg, 1);
+}
+
+static void draw_window_content(Window* w) {
+    int cx = w->x + 4;
+    int cy = w->y + WIN_CAPTION_H;
+    int cw = w->w - 8;
+    int ch = w->h - WIN_CAPTION_H - 4;
+    
+    draw_rect(cx, cy, cw, ch, COL_WIN_BODY);
+
+    if (w->type == APP_WELCOME) {
+        graphics_draw_string_scaled(cx + 10, cy + 20, "Welcome to Nostalux!", COL_BLACK, COL_WIN_BODY, 1);
+        graphics_draw_string_scaled(cx + 10, cy + 40, "Fully interactive GUI.", 0xFF555555, COL_WIN_BODY, 1);
+        graphics_draw_string_scaled(cx + 10, cy + 70, "Drag windows, click", 0xFF555555, COL_WIN_BODY, 1);
+        graphics_draw_string_scaled(cx + 10, cy + 85, "Start, or type in Notepad.", 0xFF555555, COL_WIN_BODY, 1);
+    }
+    else if (w->type == APP_NOTEPAD) {
+        // White paper background
+        draw_rect(cx + 2, cy + 2, cw - 4, ch - 4, COL_WHITE);
+        // Draw text buffer
+        graphics_draw_string_scaled(cx + 6, cy + 6, w->text_buffer, COL_BLACK, COL_WHITE, 1);
+        // Cursor
+        int cursor_x = cx + 6 + (w->text_len * 8);
+        if ((timer_get_ticks() / 50) % 2 == 0) { // Blink
+            draw_rect(cursor_x, cy + 6, 2, 10, COL_BLACK);
+        }
+    }
+    else if (w->type == APP_CALC) {
+        // Display
+        draw_rect(cx + 10, cy + 10, cw - 20, 25, COL_WHITE);
+        draw_rect(cx + 10, cy + 10, cw - 20, 1, 0xFF888888); // inset shadow
+        graphics_draw_string_scaled(cx + 15, cy + 18, "0", COL_BLACK, COL_WHITE, 1);
+        
+        // Buttons Grid
+        const char* btns[] = {"7","8","9","/", "4","5","6","*", "1","2","3","-", "C","0","=","+"};
+        int bx = cx + 10;
+        int by = cy + 45;
+        for (int i = 0; i < 16; i++) {
+            int row = i / 4;
+            int col = i % 4;
+            bool hover = point_in_rect(mouse.x, mouse.y, bx + col*35, by + row*30, 30, 25);
+            draw_button(bx + col*35, by + row*30, 30, 25, btns[i], hover);
+        }
+    }
 }
 
 static void draw_window_frame(Window* w, bool active) {
     if (!w->visible || w->minimized) return;
 
-    uint32_t border_col = active ? COL_WIN_BORDER : 0xFF888888;
-    
-    // 1. Frame/Border with Shadow offset
-    graphics_fill_rect(w->x + 5, w->y + 5, w->w, w->h, 0x40000000); // Pseudo Shadow
-    graphics_fill_rect(w->x, w->y, w->w, w->h, border_col);
-    
-    // 2. Title Bar
-    // Gradient simulation: Top half lighter
-    graphics_fill_rect(w->x + 2, w->y + 2, w->w - 4, WIN_CAPTION_H, border_col);
-    
-    graphics_draw_string_scaled(w->x + 8, w->y + 6, w->title, COL_BLACK, border_col, 1);
+    uint32_t border = active ? COL_WIN_ACTIVE : COL_WIN_INACT;
+    uint32_t title_col = active ? COL_BLACK : 0xFF555555;
 
-    // 3. Controls (Min / Close)
-    int btn_w = 20;
-    int btn_h = 18;
-    int close_x = w->x + w->w - btn_w - 4;
-    int min_x = close_x - btn_w - 2;
-    int btn_y = w->y + 4;
+    // Shadow
+    draw_rect(w->x + 6, w->y + 6, w->w, w->h, 0x40000000);
 
-    // Close [X] - Red
-    graphics_fill_rect(close_x, btn_y, btn_w, btn_h, COL_RED);
-    graphics_draw_char(close_x + 6, btn_y + 5, 'X', COL_WHITE, COL_RED);
+    // Border
+    draw_rect(w->x, w->y, w->w, w->h, border);
+    draw_rect(w->x + 1, w->y + 1, w->w - 2, w->h - 2, border);
 
-    // Min [_] - Border Color Darkened
-    graphics_fill_rect(min_x, btn_y, btn_w, btn_h, 0xFF507291);
-    graphics_draw_char(min_x + 6, btn_y + 5, '_', COL_WHITE, 0xFF507291);
+    // Title Bar
+    draw_rect(w->x + 3, w->y + 3, w->w - 6, WIN_CAPTION_H - 3, border); // Gradient placeholder
+    graphics_draw_string_scaled(w->x + 8, w->y + 8, w->title, title_col, border, 1);
 
-    // 4. Client Area
-    graphics_fill_rect(w->x + 4, w->y + WIN_CAPTION_H, w->w - 8, w->h - WIN_CAPTION_H - 4, COL_WIN_BODY);
+    // Controls
+    int btn_sz = 18;
+    int close_x = w->x + w->w - 24;
+    int min_x   = close_x - 22;
+    int btn_y   = w->y + 5;
 
-    // 5. Content Stubs
-    int cx = w->x + 10;
-    int cy = w->y + WIN_CAPTION_H + 10;
-    uint32_t bg = COL_WIN_BODY;
-    uint32_t fg = COL_BLACK;
+    bool hover_close = point_in_rect(mouse.x, mouse.y, close_x, btn_y, btn_sz, btn_sz);
+    draw_rect(close_x, btn_y, btn_sz, btn_sz, hover_close ? COL_RED : 0xFFCC8888);
+    graphics_draw_char(close_x + 5, btn_y + 5, 'X', COL_WHITE, hover_close ? COL_RED : 0xFFCC8888);
 
-    if (w->type == WIN_WELCOME) {
-        graphics_draw_string_scaled(cx, cy, "Welcome to Nostalux OS", fg, bg, 1);
-        graphics_draw_string_scaled(cx, cy+20, "This is a GUI Demo.", fg, bg, 1);
-        graphics_draw_string_scaled(cx, cy+40, "Drag windows by the title.", fg, bg, 1);
-    } else if (w->type == WIN_CALC) {
-        draw_raised_rect(cx, cy, 150, 30, COL_WHITE);
-        graphics_draw_string_scaled(cx+140, cy+10, "0", fg, COL_WHITE, 1);
-        // Mock Buttons
-        for(int i=0; i<3; i++) {
-            for(int j=0; j<3; j++) {
-                draw_raised_rect(cx + j*40, cy + 40 + i*30, 35, 25, 0xFFDDDDDD);
-            }
-        }
-    } else if (w->type == WIN_NOTEPAD) {
-        graphics_fill_rect(cx, cy, w->w - 20, w->h - 50, COL_WHITE);
-        graphics_draw_string_scaled(cx+2, cy+2, "Type something...", 0xFF888888, COL_WHITE, 1);
-    }
-}
+    bool hover_min = point_in_rect(mouse.x, mouse.y, min_x, btn_y, btn_sz, btn_sz);
+    draw_rect(min_x, btn_y, btn_sz, btn_sz, hover_min ? COL_BTN_HOVER : 0xFF88AACC);
+    graphics_draw_char(min_x + 5, btn_y + 5, '_', COL_WHITE, hover_min ? COL_BTN_HOVER : 0xFF88AACC);
 
-static void draw_icon(Icon* icon) {
-    // Simple "File" shape
-    int ix = icon->x;
-    int iy = icon->y;
-    
-    // Icon Body
-    graphics_fill_rect(ix + 10, iy, 30, 40, 0xFFF4C842); // Yellow folder-ish
-    graphics_fill_rect(ix + 10, iy, 30, 2, 0xFFFFFFFF);
-    
-    // Label Background (if selected)
-    if (icon->selected) {
-        int len = kstrlen(icon->label);
-        graphics_fill_rect(ix, iy + 45, len * 8, 10, 0xFF0000AA);
-        graphics_draw_string_scaled(ix, iy + 45, icon->label, COL_WHITE, 0xFF0000AA, 1);
-    } else {
-        // Shadow text effect
-        graphics_draw_string_scaled(ix + 1, iy + 46, icon->label, 0xFF000000, COL_DESKTOP, 1); // Shadow
-        graphics_draw_string_scaled(ix, iy + 45, icon->label, COL_WHITE, COL_DESKTOP, 1);
-    }
+    // Content
+    draw_window_content(w);
 }
 
 static void draw_taskbar_ui(void) {
-    // Bar
     int y = screen_h - TASKBAR_H;
-    graphics_fill_rect(0, y, screen_w, TASKBAR_H, COL_TASKBAR);
-    // Glassy highlight top
-    graphics_fill_rect(0, y, screen_w, 1, 0xFF607080);
+    draw_rect(0, y, screen_w, TASKBAR_H, COL_TASKBAR);
+    draw_rect(0, y, screen_w, 1, 0xFF607080); // Highlight
 
-    // Start Button (Round-ish Rect)
-    draw_raised_rect(2, y + 2, 50, TASKBAR_H - 4, COL_START_BTN);
-    graphics_draw_string_scaled(8, y + 12, "Start", COL_WHITE, COL_START_BTN, 1);
+    // Start Button
+    bool hover_start = point_in_rect(mouse.x, mouse.y, 0, y, 80, TASKBAR_H);
+    uint32_t start_col = hover_start ? COL_START_HOVER : COL_START_BTN;
+    draw_rect(0, y, 80, TASKBAR_H, start_col);
+    graphics_draw_string_scaled(15, y + 10, "Start", COL_WHITE, start_col, 1);
 
-    // Taskbar Buttons for Windows
-    int btn_x = 60;
-    int btn_w = 100;
+    // Task Buttons
+    int bx = 90;
     for (int i = 0; i < MAX_WINDOWS; i++) {
         if (windows[i].visible) {
-            uint32_t col = windows[i].minimized ? COL_TASKBAR : 0xFF2D4A6B;
-            draw_raised_rect(btn_x, y + 2, btn_w, TASKBAR_H - 4, col);
+            bool active = (i == focused_win_idx) && !windows[i].minimized;
+            bool hover = point_in_rect(mouse.x, mouse.y, bx, y + 2, 100, TASKBAR_H - 4);
+            uint32_t bg = active ? 0xFF3A6EA5 : (hover ? 0xFF4A7EB5 : 0xFF2A4E75);
             
-            // Truncate title if needed? Just draw simply
-            graphics_draw_string_scaled(btn_x + 5, y + 12, windows[i].title, COL_WHITE, col, 1);
+            draw_rect(bx, y + 2, 100, TASKBAR_H - 4, bg);
+            graphics_draw_string_scaled(bx + 10, y + 12, windows[i].title, COL_WHITE, bg, 1);
             
-            btn_x += btn_w + 2;
+            bx += 105;
         }
     }
 
     // Clock
-    graphics_draw_string_scaled(screen_w - 50, y + 12, "12:00", COL_WHITE, COL_TASKBAR, 1);
+    draw_rect(screen_w - 60, y + 2, 60, TASKBAR_H - 4, 0xFF102030);
+    graphics_draw_string_scaled(screen_w - 50, y + 12, "12:00", COL_WHITE, 0xFF102030, 1);
 }
 
 static void draw_start_menu_ui(void) {
     if (!start_menu.open) return;
-    
-    // Background
-    draw_raised_rect(start_menu.x, start_menu.y, start_menu.w, start_menu.h, 0xFFF0F0F0);
-    
-    // Left Pane (White)
-    graphics_fill_rect(start_menu.x + 2, start_menu.y + 2, 100, start_menu.h - 40, COL_WHITE);
-    
-    // Right Pane (Light Blue)
-    graphics_fill_rect(start_menu.x + 102, start_menu.y + 2, start_menu.w - 104, start_menu.h - 40, 0xFFD0E0F0);
+    int x = start_menu.x;
+    int y = start_menu.y;
+    int w = start_menu.w;
+    int h = start_menu.h;
+
+    draw_rect(x, y, w, h, COL_WHITE);
+    draw_rect(x, y, w, 1, 0xFF888888); // Border
+    draw_rect(x + w - 1, y, 1, h, 0xFF888888);
+    draw_rect(x, y, 1, h, 0xFF888888);
+
+    // User Header
+    draw_rect(x + 2, y + 2, w - 4, 40, COL_WIN_ACTIVE);
+    graphics_draw_string_scaled(x + 10, y + 14, "Guest", COL_WHITE, COL_WIN_ACTIVE, 1);
 
     // Items
-    int iy = start_menu.y + 10;
-    graphics_draw_string_scaled(start_menu.x + 10, iy, "Notepad", COL_BLACK, COL_WHITE, 1);
-    graphics_draw_string_scaled(start_menu.x + 10, iy + 20, "Calc", COL_BLACK, COL_WHITE, 1);
-    graphics_draw_string_scaled(start_menu.x + 10, iy + 40, "Info", COL_BLACK, COL_WHITE, 1);
-
-    // Bottom Bar (Shutdown)
-    int by = start_menu.y + start_menu.h - 36;
-    graphics_fill_rect(start_menu.x + 2, by, start_menu.w - 4, 34, 0xFF303030);
-    
-    // Shutdown Button
-    draw_raised_rect(start_menu.x + start_menu.w - 80, by + 6, 70, 22, 0xFFE81123); // Red
-    graphics_draw_string_scaled(start_menu.x + start_menu.w - 70, by + 12, "Off", COL_WHITE, 0xFFE81123, 1);
+    const char* items[] = {"Notepad", "Calculator", "My Computer", "Run...", "Shutdown"};
+    int iy = y + 50;
+    for (int i = 0; i < 5; i++) {
+        bool hover = point_in_rect(mouse.x, mouse.y, x + 2, iy, w - 4, 25);
+        uint32_t bg = hover ? COL_BTN_HOVER : COL_WHITE;
+        uint32_t fg = hover ? COL_WHITE : COL_BLACK;
+        
+        draw_rect(x + 2, iy, w - 4, 25, bg);
+        graphics_draw_string_scaled(x + 10, iy + 8, items[i], fg, bg, 1);
+        iy += 30;
+    }
 }
 
 static void draw_cursor_sprite(void) {
     int x = mouse.x;
     int y = mouse.y;
-    // Standard Arrow
-    uint32_t white = 0xFFFFFFFF;
-    uint32_t black = 0xFF000000;
+    uint32_t border = COL_BLACK;
+    uint32_t fill = COL_WHITE;
     
-    graphics_fill_rect(x, y, 2, 14, black);
-    graphics_fill_rect(x, y, 12, 2, black);
-    graphics_fill_rect(x+2, y+2, 8, 10, white);
-    graphics_fill_rect(x+2, y+12, 2, 2, black); // Tip
+    // Arrow shape
+    draw_rect(x, y, 2, 14, border);
+    draw_rect(x, y, 12, 2, border);
+    draw_rect(x+2, y+2, 8, 10, fill);
+    draw_rect(x+2, y+12, 2, 2, border); // Tip
 }
 
-// --- Logic Core ---
+// --- Input Handling ---
 
-static void handle_input_logic(void) {
-    // 1. Keyboard (Q to quit)
-    char c = keyboard_poll_char();
-    if (c == 'q' || c == 'Q') {
-        // Signal exit (we'll check this in main loop)
-        // For now, just rely on main loop check or explicit shutdown
+static void handle_input(void) {
+    // Keyboard for Notepad
+    if (focused_win_idx != -1 && windows[focused_win_idx].type == APP_NOTEPAD) {
+        char c = keyboard_poll_char();
+        if (c != 0) {
+            Window* w = &windows[focused_win_idx];
+            if (c == '\b') {
+                if (w->text_len > 0) w->text_buffer[--w->text_len] = 0;
+            } else if (c >= 32 && c <= 126 && w->text_len < 30) { // Limit length for demo
+                w->text_buffer[w->text_len++] = c;
+                w->text_buffer[w->text_len] = 0;
+            }
+        }
+    } else {
+        // Discard key if no focus (or handle shortcuts)
+        keyboard_poll_char(); 
     }
 
-    // 2. Mouse Button Logic (Click vs Drag)
-    bool click_event = (mouse.left_button && !prev_mouse.left_button);
-    bool release_event = (!mouse.left_button && prev_mouse.left_button);
+    // Mouse Interaction
+    bool click = mouse.left_button && !prev_mouse.left_button;
+    bool release = !mouse.left_button && prev_mouse.left_button;
 
-    if (click_event) {
-        bool hit_handled = false;
+    int tb_y = screen_h - TASKBAR_H;
 
-        // A. Start Menu Items (if open)
-        if (start_menu.open && point_in_rect(mouse.x, mouse.y, start_menu.x, start_menu.y, start_menu.w, start_menu.h)) {
-            hit_handled = true;
-            // Check Shutdown
-            if (point_in_rect(mouse.x, mouse.y, start_menu.x + start_menu.w - 80, start_menu.y + start_menu.h - 30, 70, 22)) {
-                sys_shutdown();
+    // 1. Check Start Menu
+    if (start_menu.open) {
+        if (click) {
+            // Check items
+            int iy = start_menu.y + 50;
+            if (point_in_rect(mouse.x, mouse.y, start_menu.x, iy, start_menu.w, 25)) { /* Notepad */ 
+                windows[1].visible = true; windows[1].minimized = false; bring_to_front(1); start_menu.open = false; 
             }
-            // Check Apps
-            if (mouse.y < start_menu.y + 30) spawn_window(WIN_NOTEPAD);
-            else if (mouse.y < start_menu.y + 50) spawn_window(WIN_CALC);
-            else if (mouse.y < start_menu.y + 70) spawn_window(WIN_ABOUT);
-            
-            start_menu.open = false; // Auto close on click
+            else if (point_in_rect(mouse.x, mouse.y, start_menu.x, iy+30, start_menu.w, 25)) { /* Calc */ 
+                windows[2].visible = true; windows[2].minimized = false; bring_to_front(2); start_menu.open = false; 
+            }
+            else if (point_in_rect(mouse.x, mouse.y, start_menu.x, iy+120, start_menu.w, 25)) { /* Shutdown */ 
+                // Just exit GUI for now
+                start_menu.open = false; // Or trigger exit flag
+            }
+            else if (!point_in_rect(mouse.x, mouse.y, start_menu.x, start_menu.y, start_menu.w, start_menu.h)) {
+                start_menu.open = false; // Clicked outside
+            }
         }
-        else if (start_menu.open) {
-            start_menu.open = false; // Clicked outside
-        }
+    }
 
-        // B. Start Button
-        if (!hit_handled && point_in_rect(mouse.x, mouse.y, 0, screen_h - TASKBAR_H, 55, TASKBAR_H)) {
+    // 2. Check Taskbar
+    if (click && mouse.y >= tb_y) {
+        // Start Button
+        if (point_in_rect(mouse.x, mouse.y, 0, tb_y, 80, TASKBAR_H)) {
             start_menu.open = !start_menu.open;
-            hit_handled = true;
         }
-
-        // C. Taskbar Buttons
-        if (!hit_handled && mouse.y >= screen_h - TASKBAR_H) {
-            int btn_x = 60;
+        // Task Buttons
+        else {
+            int bx = 90;
             for (int i = 0; i < MAX_WINDOWS; i++) {
                 if (windows[i].visible) {
-                    if (point_in_rect(mouse.x, mouse.y, btn_x, screen_h - TASKBAR_H, 100, TASKBAR_H)) {
-                        // Toggle Minimize
-                        if (i == MAX_WINDOWS - 1 && !windows[i].minimized) {
+                    if (point_in_rect(mouse.x, mouse.y, bx, tb_y, 100, TASKBAR_H)) {
+                        if (i == focused_win_idx && !windows[i].minimized) {
                             windows[i].minimized = true;
                         } else {
                             windows[i].minimized = false;
                             bring_to_front(i);
                         }
-                        hit_handled = true;
-                        break;
                     }
-                    btn_x += 102;
+                    bx += 105;
                 }
             }
-            hit_handled = true; // Consumed by taskbar bg
         }
+    }
 
-        // D. Windows (Top to Bottom)
-        if (!hit_handled) {
-            for (int i = MAX_WINDOWS - 1; i >= 0; i--) {
-                Window* w = &windows[i];
-                if (!w->visible || w->minimized) continue;
-
-                // Hit Window
-                if (point_in_rect(mouse.x, mouse.y, w->x, w->y, w->w, w->h)) {
-                    bring_to_front(i); // Focus
-                    
+    // 3. Check Windows (Front to Back logic for clicks, but we iterate all)
+    // We need to check focused first to avoid clicking "through" windows
+    if (click && !start_menu.open && mouse.y < tb_y) {
+        bool hit = false;
+        
+        // Check focused first
+        if (focused_win_idx != -1 && windows[focused_win_idx].visible && !windows[focused_win_idx].minimized) {
+            Window* w = &windows[focused_win_idx];
+            if (point_in_rect(mouse.x, mouse.y, w->x, w->y, w->w, w->h)) {
+                hit = true;
+                // Check Drag
+                if (mouse.y < w->y + WIN_CAPTION_H) {
                     // Check Close
-                    if (point_in_rect(mouse.x, mouse.y, w->x + w->w - 26, w->y + 4, 20, 18)) {
-                        w->visible = false;
+                    if (mouse.x > w->x + w->w - 24) w->visible = false;
+                    // Check Min
+                    else if (mouse.x > w->x + w->w - 48) w->minimized = true;
+                    else {
+                        w->dragging = true;
+                        w->drag_off_x = mouse.x - w->x;
+                        w->drag_off_y = mouse.y - w->y;
                     }
-                    // Check Minimize
-                    else if (point_in_rect(mouse.x, mouse.y, w->x + w->w - 50, w->y + 4, 20, 18)) {
-                        w->minimized = true;
+                }
+                // Check Content (Calc Buttons)
+                else if (w->type == APP_CALC) {
+                    // Simple logic: if clicked anywhere in buttons area, just append '1' for demo
+                    // Real logic requires mapping the grid again.
+                    if (point_in_rect(mouse.x, mouse.y, w->x + 10, w->y + 45, 140, 120)) {
+                        // Demo: Add '1'
+                        // w->text_buffer... etc
                     }
-                    // Check Drag (Title Bar)
-                    else if (mouse.y < w->y + WIN_CAPTION_H) {
-                        // We must get the pointer to the NEW location after bring_to_front
-                        // Since we called bring_to_front(i), this window is now at MAX_WINDOWS-1
-                        windows[MAX_WINDOWS-1].dragging = true;
-                        windows[MAX_WINDOWS-1].drag_off_x = mouse.x - w->x;
-                        windows[MAX_WINDOWS-1].drag_off_y = mouse.y - w->y;
-                    }
-                    
-                    hit_handled = true;
-                    break;
                 }
             }
         }
 
-        // E. Desktop Icons
-        if (!hit_handled) {
-            for (int i = 0; i < MAX_ICONS; i++) {
-                // Simple hit box
-                if (point_in_rect(mouse.x, mouse.y, icons[i].x, icons[i].y, 50, 50)) {
-                    icons[i].selected = true;
-                    // Double click simulation? For now single click launch
-                    spawn_window(icons[i].action_type);
-                } else {
-                    icons[i].selected = false;
+        // If not hit focused, find top-most other window
+        if (!hit) {
+            for (int i = MAX_WINDOWS - 1; i >= 0; i--) {
+                if (windows[i].visible && !windows[i].minimized) {
+                    if (point_in_rect(mouse.x, mouse.y, windows[i].x, windows[i].y, windows[i].w, windows[i].h)) {
+                        bring_to_front(i);
+                        // We don't process drag/close on the click that focuses it to prevent accidents
+                        break; 
+                    }
                 }
             }
         }
     }
 
-    if (release_event) {
-        for (int i = 0; i < MAX_WINDOWS; i++) windows[i].dragging = false;
-    }
-
-    // Drag Logic
-    if (mouse.left_button) {
-        // Only the topmost window can be dragging
-        Window* top = &windows[MAX_WINDOWS - 1];
-        if (top->visible && top->dragging) {
-            top->x = mouse.x - top->drag_off_x;
-            top->y = mouse.y - top->drag_off_y;
+    // Dragging
+    if (focused_win_idx != -1 && windows[focused_win_idx].dragging) {
+        if (!mouse.left_button) {
+            windows[focused_win_idx].dragging = false;
+        } else {
+            windows[focused_win_idx].x = mouse.x - windows[focused_win_idx].drag_off_x;
+            windows[focused_win_idx].y = mouse.y - windows[focused_win_idx].drag_off_y;
         }
     }
 }
 
+// --- Main Entry ---
+
 void gui_demo_run(void) {
-    syslog_write("GUI: Starting Desktop Environment...");
-    
-    mouse_init();
-    init_gui_system();
+    syslog_write("GUI: Starting Desktop Environment");
+    mouse_init(); // Re-init to be sure
+    gui_init();
 
     bool running = true;
-    
     while (running) {
-        // Check Quit Key
-        // (We need a raw check or assume 'q' from poll)
-        // char c = keyboard_poll_char(); 
-        // if (c == 'q') running = false;
-
-        // Update Inputs
         prev_mouse = mouse;
-        mouse = mouse_get_state();
-        
-        handle_input_logic();
+        mouse = mouse_get_state(); // Update from driver
 
-        // Draw Frame
+        // Exit Combo (Top Left Corner + Right Click)
+        if (mouse.x < 5 && mouse.y < 5 && mouse.right_button) running = false;
+
+        handle_input();
+
+        // Render (Painter's Algorithm)
         // 1. Desktop
-        graphics_fill_rect(0, 0, screen_w, screen_h, COL_DESKTOP);
+        draw_rect(0, 0, screen_w, screen_h, COL_DESKTOP);
         
         // 2. Icons
-        for (int i = 0; i < 3; i++) draw_icon(&icons[i]);
+        graphics_draw_string_scaled(20, 20, "My PC", COL_WHITE, COL_DESKTOP, 1);
+        graphics_draw_string_scaled(20, 60, "Trash", COL_WHITE, COL_DESKTOP, 1);
 
-        // 3. Windows (Bottom to Top)
+        // 3. Windows (Background ones)
         for (int i = 0; i < MAX_WINDOWS; i++) {
-            // Active window is last, so it draws on top
-            bool is_active = (i == MAX_WINDOWS - 1);
-            draw_window_frame(&windows[i], is_active);
+            if (i != focused_win_idx) draw_window_frame(&windows[i], false);
         }
+        // 4. Focused Window
+        if (focused_win_idx != -1) draw_window_frame(&windows[focused_win_idx], true);
 
-        // 4. Shells
+        // 5. Taskbar & Menus
         draw_taskbar_ui();
         draw_start_menu_ui();
-        
-        // 5. Cursor
+
+        // 6. Cursor
         draw_cursor_sprite();
 
-        // Loop delay
+        // VSync / Delay
         timer_wait(1);
     }
+    
+    // Clear screen on exit
+    graphics_fill_rect(0, 0, screen_w, screen_h, 0xFF000000);
 }
