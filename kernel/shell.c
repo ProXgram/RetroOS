@@ -19,6 +19,7 @@
 #include "kstdio.h" 
 #include "ata.h"    
 #include "banner.h"
+#include "gui_demo.h" // Includes the GUI entry point
 
 struct shell_command {
     const char* name;
@@ -55,14 +56,14 @@ static void command_snake(const char* args);
 static void command_beep(const char* args);
 static void command_disktest(const char* args);
 static void command_banner(const char* args);
-
-static void log_command_invocation(const char* command_name);
+static void command_gui(const char* args);
 
 static const struct shell_command COMMANDS[] = {
     {"help", command_help, "Show this help message"},
     {"about", command_about, "Learn more about " OS_NAME},
     {"clear", command_clear, "Clear the screen"},
     {"banner", command_banner, "Show moving banner screensaver"},
+    {"gui", command_gui, "Launch Windows XP-style GUI demo"},
     {"time", command_time, "Show current RTC date/time"},
     {"uptime", command_uptime, "Show time since boot"},  
     {"sleep", command_sleep, "Pause for N seconds"},     
@@ -282,11 +283,12 @@ static void command_touch(const char* args) {
 }
 
 static void command_write(const char* args) {
-    // Simplified parsing
+    (void)args;
     kprintf("Usage: write <file> <content> (Not implemented fully in this snippet)\n");
 }
 
 static void command_append(const char* args) {
+    (void)args;
     kprintf("Usage: append <file> <content> (Not implemented fully in this snippet)\n");
 }
 
@@ -316,9 +318,6 @@ static void command_logs(const char* args) {
 
 static void command_snake(const char* args) {
     (void)args;
-    // Note: Snake takes over the screen loop, so background animation
-    // might pause or run on top depending on implementation.
-    // Ideally disable callback before snake, enable after.
     timer_set_callback(NULL); // Stop background animation
     snake_game_run();
     background_render();
@@ -344,7 +343,11 @@ static void command_reboot(const char* args) {
 
 static void command_shutdown(const char* args) {
     (void)args;
-    outb(0x604, 0x2000); // QEMU
+    kprintf("Shutting down...\n");
+    outw(0x604, 0x2000); 
+    outw(0xB004, 0x2000);
+    outw(0x4004, 0x3400);
+    for(;;) __asm__ volatile ("cli; hlt");
 }
 
 static void command_banner(const char* args) {
@@ -355,12 +358,23 @@ static void command_banner(const char* args) {
     shell_print_banner();
 }
 
-static void log_command_invocation(const char* command_name) {
-    (void)command_name;
+static void command_gui(const char* args) {
+    (void)args;
+    // Stop background animation to take full control of screen
+    timer_set_callback(NULL);
+    gui_demo_run();
+    // Restore shell environment
+    background_render();
+    shell_print_banner();
+    timer_set_callback(background_animate);
 }
 
 static void command_echo(const char* args) {
     kprintf("%s\n", kskip_spaces(args));
+}
+
+static void log_command_invocation(const char* command_name) {
+    (void)command_name;
 }
 
 static void execute_command(const char* input) {
@@ -381,6 +395,7 @@ static void execute_command(const char* input) {
 
     for (size_t j = 0; j < COMMAND_COUNT; j++) {
         if (kstrcmp(cmd_name, COMMANDS[j].name) == 0) {
+            log_command_invocation(COMMANDS[j].name);
             COMMANDS[j].handler(args);
             return;
         }
