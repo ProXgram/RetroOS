@@ -66,8 +66,8 @@ void background_animate(void) {
     static int direction = 1;
     static int tick = 0;
     
-    // Slow down animation
-    if (tick++ < 500) return; // Call freq is high (polling loop)
+    // Update animation every 10 ticks (~100ms at 100Hz)
+    if (tick++ < 10) return;
     tick = 0;
 
     const char* msg = "Welcome to " OS_NAME;
