@@ -6,6 +6,7 @@
 #include "background.h"
 #include "kstring.h"
 #include "syslog.h"
+#include "sound.h"
 
 // Helper to draw a string at specific pixel coordinates directly to the framebuffer
 static void draw_string_px(int x, int y, const char* str, uint32_t fg, uint32_t bg) {
@@ -17,7 +18,7 @@ static void draw_string_px(int x, int y, const char* str, uint32_t fg, uint32_t 
     }
 }
 
-// The big banner ASCII art
+// The big banner ASCII art (used by banner_run)
 static const char* BIG_BANNER[] = {
     " _   _           _        _             ____   _____                           ",
     "| \\ | |         | |      | |           / __ \\ / ____|                          ",
@@ -34,6 +35,7 @@ static void draw_big_banner(int x, int y, uint32_t fg, uint32_t bg) {
     }
 }
 
+// Screensaver Mode
 void banner_run(void) {
     syslog_write("Banner: Starting big animation...");
     
@@ -129,4 +131,80 @@ void banner_run(void) {
     }
     
     background_render();
+}
+
+// Cinematic Boot Mode
+void banner_boot_splash(void) {
+    int width = graphics_get_width();
+    int height = graphics_get_height();
+    
+    // Animation configuration
+    int scale_title = 6;
+    int scale_sub = 2;
+    const char* title_text = "NOSTALUX";
+    const char* sub_text = "OPERATING SYSTEM";
+    
+    // Calculate final centered positions
+    int title_px_w = (int)kstrlen(title_text) * 8 * scale_title;
+    int sub_px_w = (int)kstrlen(sub_text) * 8 * scale_sub;
+    
+    int final_title_x = (width - title_px_w) / 2;
+    int final_sub_x = (width - sub_px_w) / 2;
+    
+    int title_y = (height / 2) - (8 * scale_title) / 2 - 20;
+    int sub_y = title_y + (8 * scale_title) + 20;
+
+    // Clear screen to black initially
+    graphics_fill_rect(0, 0, width, height, 0xFF000000);
+
+    // Animation Loop (60 frames ~ 1.2 seconds if 20ms delay)
+    const int TOTAL_FRAMES = 60;
+    
+    for (int frame = 0; frame <= TOTAL_FRAMES; frame++) {
+        // Simple linear progress 0.0 to 1.0
+        float t = (float)frame / (float)TOTAL_FRAMES;
+        
+        // Easing: ease-out cubic
+        float ease = 1.0f - (1.0f - t) * (1.0f - t) * (1.0f - t);
+
+        // Slide Title from Left
+        int start_title_x = -title_px_w;
+        int current_title_x = start_title_x + (int)((final_title_x - start_title_x) * ease);
+        
+        // Slide Subtitle from Right
+        int start_sub_x = width;
+        int current_sub_x = start_sub_x + (int)((final_sub_x - start_sub_x) * ease);
+
+        // Redraw (clear only the band where text is to optimize?)
+        // For simplicity and correctness, clear screen (black)
+        graphics_fill_rect(0, 0, width, height, 0xFF000000);
+
+        // Draw Text
+        graphics_draw_string_scaled(current_title_x, title_y, title_text, 0xFF00FFFF, 0, scale_title);
+        graphics_draw_string_scaled(current_sub_x, sub_y, sub_text, 0xFFFFFF00, 0, scale_sub);
+
+        // Sound effects synced to animation
+        if (frame == 10) sound_beep(220, 1);
+        if (frame == 30) sound_beep(330, 1);
+        if (frame == 50) sound_beep(440, 1);
+
+        // Allow user to skip with any key
+        if (keyboard_poll_char() != 0) return;
+
+        timer_wait(2); // 20ms
+    }
+
+    // Play startup chime
+    sound_beep(523, 10); // C5
+    sound_beep(659, 10); // E5
+    sound_beep(784, 20); // G5
+
+    // Hold the final frame for a moment
+    for (int i = 0; i < 50; i++) { // ~1 second
+        if (keyboard_poll_char() != 0) return;
+        timer_wait(2);
+    }
+    
+    // Clear screen before handing off to shell
+    graphics_fill_rect(0, 0, width, height, 0xFF000000);
 }
