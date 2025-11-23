@@ -27,4 +27,9 @@ void terminal_scroll_down(void);
 /* Direct Access for UI Elements */
 void terminal_write_at(size_t row, size_t col, const char* text, uint8_t fg, uint8_t bg);
 
+/* Layout Control */
+/* Prevents the terminal from drawing to the specified number of top rows.
+   Useful for reserving space for graphical headers. */
+void terminal_set_margin_top(size_t rows);
+
 #endif /* TERMINAL_H */
