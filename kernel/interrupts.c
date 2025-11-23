@@ -7,7 +7,8 @@
 #include "io.h"
 #include "keyboard.h"
 #include "timer.h"
-#include "graphics.h" // Updated for GUI Panic
+#include "graphics.h"
+#include "mouse.h" // Added for mouse handler
 
 struct interrupt_frame {
     uint64_t rip;
@@ -260,6 +261,14 @@ __attribute__((interrupt)) static void handler_irq_timer(struct interrupt_frame*
     outb(PIC1_COMMAND, PIC_EOI);
 }
 
+// --- NEW MOUSE HANDLER ---
+__attribute__((interrupt)) static void handler_irq_mouse(struct interrupt_frame* frame) {
+    (void)frame;
+    mouse_handle_interrupt();
+    outb(PIC2_COMMAND, PIC_EOI);
+    outb(PIC1_COMMAND, PIC_EOI);
+}
+
 static void idt_set_gate(uint8_t vector, void* handler) {
     uint64_t address = (uint64_t)handler;
     g_idt[vector].offset_low = (uint16_t)(address & 0xFFFF);
@@ -327,8 +336,10 @@ void interrupts_init(void) {
         idt_set_gate(vector, handler_irq_slave);
     }
 
+    // Handlers
     idt_set_gate(0x20, handler_irq_timer);
     idt_set_gate(0x21, handler_irq_keyboard);
+    idt_set_gate(0x2C, handler_irq_mouse); // Register IRQ 12 (0x20 + 12)
 
     const struct idt_descriptor descriptor = {
         .limit = (uint16_t)(sizeof(g_idt) - 1),
