@@ -2,26 +2,33 @@
 #include "io.h"
 #include "syslog.h"
 #include "interrupts.h"
+#include <stddef.h> 
 
-/* 1.193182 MHz */
 #define PIT_FREQUENCY 1193180
 
 static volatile uint64_t g_ticks = 0;
 static int g_freq_hz = 100;
+static timer_callback_t g_callback = NULL;
 
 void timer_phase(int hz) {
     if (hz == 0) hz = 100;
     g_freq_hz = hz;
-
     int divisor = PIT_FREQUENCY / hz;
+    outb(0x43, 0x36);
+    outb(0x40, (uint8_t)(divisor & 0xFF));
+    outb(0x40, (uint8_t)((divisor >> 8) & 0xFF));
+}
 
-    outb(0x43, 0x36);             /* Command byte: Channel 0, Access lo/hi, Square Wave */
-    outb(0x40, (uint8_t)(divisor & 0xFF));      /* Low byte */
-    outb(0x40, (uint8_t)((divisor >> 8) & 0xFF)); /* High byte */
+void timer_set_callback(timer_callback_t callback) {
+    g_callback = callback;
 }
 
 void timer_handler(void) {
     g_ticks++;
+    // Run animation ~25 times a second (100Hz / 4)
+    if (g_callback != NULL && (g_ticks % 4 == 0)) {
+        g_callback();
+    }
 }
 
 void timer_wait(int ticks) {
@@ -31,17 +38,12 @@ void timer_wait(int ticks) {
     }
 }
 
-uint64_t timer_get_ticks(void) {
-    return g_ticks;
-}
-
-uint64_t timer_get_uptime(void) {
-    return g_ticks / g_freq_hz;
-}
+uint64_t timer_get_ticks(void) { return g_ticks; }
+uint64_t timer_get_uptime(void) { return g_ticks / g_freq_hz; }
 
 void timer_init(void) {
-    /* Initialize to 100Hz (10ms per tick) */
     timer_phase(100);
-    interrupts_enable_irq(0); /* Unmask IRQ 0 */
-    syslog_write("PIT: System timer initialized at 100Hz");
+    g_callback = NULL;
+    interrupts_enable_irq(0);
+    syslog_write("PIT: System timer initialized");
 }
