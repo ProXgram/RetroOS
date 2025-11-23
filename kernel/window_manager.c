@@ -10,13 +10,6 @@ static int screen_width;
 static int screen_height;
 static bool start_menu_open = false;
 
-// Forward decls for internal rendering helpers (implemented in compositor or locally)
-static void render_desktop_bg(void);
-static void render_taskbar(void);
-static void render_start_menu(void);
-static void render_window(Window* w);
-static void render_cursor(int x, int y);
-
 // --- Helpers ---
 static bool rect_contains(int x, int y, int w, int h, int px, int py) {
     return (px >= x && px < x + w && py >= y && py < y + h);
