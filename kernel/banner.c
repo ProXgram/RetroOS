@@ -159,31 +159,39 @@ void banner_boot_splash(void) {
 
     // Animation Loop (60 frames ~ 1.2 seconds if 20ms delay)
     const int TOTAL_FRAMES = 60;
+    const long long TOTAL_CUBED = TOTAL_FRAMES * TOTAL_FRAMES * TOTAL_FRAMES;
     
     for (int frame = 0; frame <= TOTAL_FRAMES; frame++) {
-        // Simple linear progress 0.0 to 1.0
-        float t = (float)frame / (float)TOTAL_FRAMES;
+        // Integer math easing: ease-out cubic
+        // Formula: 1 - (1-t)^3
+        // where t = frame/total
         
-        // Easing: ease-out cubic
-        float ease = 1.0f - (1.0f - t) * (1.0f - t) * (1.0f - t);
+        // inv_frame represents (1-t)
+        int inv_frame = TOTAL_FRAMES - frame;
+        long long inv_cubed = (long long)inv_frame * inv_frame * inv_frame;
 
         // Slide Title from Left
+        // Pos = start + (total_dist * ease)
+        // Pos = start + total_dist * (1 - inv_cubed/total_cubed)
+        // Pos = start + total_dist - (total_dist * inv_cubed) / total_cubed
+        
         int start_title_x = -title_px_w;
-        int current_title_x = start_title_x + (int)((final_title_x - start_title_x) * ease);
+        int diff_title = final_title_x - start_title_x;
+        int current_title_x = start_title_x + diff_title - (int)((diff_title * inv_cubed) / TOTAL_CUBED);
         
         // Slide Subtitle from Right
         int start_sub_x = width;
-        int current_sub_x = start_sub_x + (int)((final_sub_x - start_sub_x) * ease);
+        int diff_sub = final_sub_x - start_sub_x;
+        int current_sub_x = start_sub_x + diff_sub - (int)((diff_sub * inv_cubed) / TOTAL_CUBED);
 
-        // Redraw (clear only the band where text is to optimize?)
-        // For simplicity and correctness, clear screen (black)
+        // Redraw (clear screen black)
         graphics_fill_rect(0, 0, width, height, 0xFF000000);
 
         // Draw Text
         graphics_draw_string_scaled(current_title_x, title_y, title_text, 0xFF00FFFF, 0, scale_title);
         graphics_draw_string_scaled(current_sub_x, sub_y, sub_text, 0xFFFFFF00, 0, scale_sub);
 
-        // Sound effects synced to animation
+        // Sound effects synced to animation frames
         if (frame == 10) sound_beep(220, 1);
         if (frame == 30) sound_beep(330, 1);
         if (frame == 50) sound_beep(440, 1);
