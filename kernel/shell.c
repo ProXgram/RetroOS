@@ -18,6 +18,7 @@
 #include "sound.h"
 #include "kstdio.h" 
 #include "ata.h"    
+#include "banner.h" // Added banner include
 
 struct shell_command {
     const char* name;
@@ -55,6 +56,7 @@ static void command_sleep(const char* args);
 static void command_snake(const char* args);
 static void command_beep(const char* args);
 static void command_disktest(const char* args);
+static void command_banner(const char* args); // Added prototype
 
 static void log_command_invocation(const char* command_name);
 
@@ -62,6 +64,7 @@ static const struct shell_command COMMANDS[] = {
     {"help", command_help, "Show this help message"},
     {"about", command_about, "Learn more about " OS_NAME},
     {"clear", command_clear, "Clear the screen"},
+    {"banner", command_banner, "Show moving banner screensaver"}, // Added command
     {"time", command_time, "Show current RTC date/time"},
     {"uptime", command_uptime, "Show time since boot"},  
     {"sleep", command_sleep, "Pause for N seconds"},     
@@ -677,6 +680,12 @@ static void command_shutdown(const char* args) {
     __asm__ volatile ("outw %0, %1" : : "a"((uint16_t)0x2000), "d"((uint16_t)0xB004));
     __asm__ volatile ("outw %0, %1" : : "a"((uint16_t)0x3400), "d"((uint16_t)0x4004));
     for(;;) __asm__ volatile ("cli; hlt");
+}
+
+static void command_banner(const char* args) {
+    (void)args;
+    banner_run();
+    shell_print_banner();
 }
 
 static void log_command_invocation(const char* command_name) {
