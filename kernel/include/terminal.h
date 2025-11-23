@@ -24,4 +24,7 @@ void terminal_move_cursor_right(size_t count);
 void terminal_scroll_up(void);
 void terminal_scroll_down(void);
 
+/* Direct Access for UI Elements */
+void terminal_write_at(size_t row, size_t col, const char* text, uint8_t fg, uint8_t bg);
+
 #endif /* TERMINAL_H */
