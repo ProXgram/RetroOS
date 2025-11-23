@@ -247,3 +247,19 @@ void terminal_scroll_down(void) {
         terminal_refresh_screen();
     }
 }
+
+void terminal_write_at(size_t row, size_t col, const char* text, uint8_t fg, uint8_t bg) {
+    if (row >= HISTORY_LINES) return;
+    
+    size_t idx = row * terminal_cols + col;
+    while (*text && col < terminal_cols) {
+        g_history[idx] = make_entry(*text, fg, bg);
+        text++;
+        col++;
+        idx++;
+    }
+    // Only refresh if we aren't batching
+    if (terminal_batch_depth == 0) {
+        terminal_refresh_screen();
+    }
+}
