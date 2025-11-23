@@ -23,13 +23,10 @@ static void boot_sequence(const struct BootInfo* boot_info) {
     terminal_initialize(cached->width, cached->height);
     syslog_write("Boot: terminal initialized");
 
-    // Initialize core drivers EARLY to allow for splash screen input/timing
+    // Initialize core drivers EARLY
     timer_init();
     keyboard_init();
     
-    // Play the cool boot splash "Nostalux" animation
-    banner_boot_splash();
-
     // Detect available memory and update system profile
     size_t memory_bytes = memtest_detect_upper_limit();
     system_set_total_memory((uint32_t)(memory_bytes / 1024));
