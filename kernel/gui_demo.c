@@ -80,6 +80,7 @@ typedef struct {
 
 typedef struct {
     int selected_index;
+    int scroll_offset;
 } FileManagerState;
 
 typedef struct {
@@ -90,7 +91,7 @@ typedef struct {
     char prompt[16];
     char input[64];
     int input_len;
-    char history[6][64]; // Increased history
+    char history[6][64];
 } TerminalState;
 
 typedef struct {
@@ -123,6 +124,17 @@ static MouseState prev_mouse;
 static uint32_t desktop_col_top = 0xFF2D73A8;
 static uint32_t desktop_col_bot = 0xFF103050;
 
+// --- Cursor Bitmap (Arrow) ---
+static const uint8_t CURSOR_BITMAP[19][12] = {
+    {1,1,0,0,0,0,0,0,0,0,0,0}, {1,2,1,0,0,0,0,0,0,0,0,0}, {1,2,2,1,0,0,0,0,0,0,0,0},
+    {1,2,2,2,1,0,0,0,0,0,0,0}, {1,2,2,2,2,1,0,0,0,0,0,0}, {1,2,2,2,2,2,1,0,0,0,0,0},
+    {1,2,2,2,2,2,2,1,0,0,0,0}, {1,2,2,2,2,2,2,2,1,0,0,0}, {1,2,2,2,2,2,2,2,2,1,0,0},
+    {1,2,2,2,2,2,2,2,2,2,1,0}, {1,2,2,2,2,2,1,1,1,1,1,1}, {1,2,2,2,2,2,1,0,0,0,0,0},
+    {1,2,1,1,2,2,1,0,0,0,0,0}, {1,1,0,1,2,2,1,0,0,0,0,0}, {0,0,0,0,1,2,2,1,0,0,0,0},
+    {0,0,0,0,1,2,2,1,0,0,0,0}, {0,0,0,0,0,1,2,2,1,0,0,0}, {0,0,0,0,0,1,2,2,1,0,0,0},
+    {0,0,0,0,0,0,1,1,0,0,0,0}
+};
+
 // --- Helpers ---
 static bool rect_contains(int x, int y, int w, int h, int px, int py) {
     return (px >= x && px < x + w && py >= y && py < y + h);
@@ -147,6 +159,15 @@ static int kstrlen_local(const char* s) {
 static void get_time_string(char* buf) {
     str_copy(buf, "12:00"); // Stub for Ring 3
 }
+
+// --- Forward Declarations for Renderers ---
+static void draw_bevel_rect(int x, int y, int w, int h, uint32_t fill, bool sunk);
+static void render_notepad(Window* w, int cx, int cy);
+static void render_calc(Window* w, int cx, int cy);
+static void render_file_manager(Window* w, int cx, int cy);
+static void render_settings(Window* w, int cx, int cy);
+static void render_terminal(Window* w, int cx, int cy);
+static void render_system_info(Window* w, int cx, int cy);
 
 // --- Window Management ---
 static void close_window(int index) {
@@ -249,6 +270,10 @@ static void create_window(AppType type, const char* title, int w, int h) {
         for(int k=0; k<6; k++) win->state.term.history[k][0] = 0;
         str_copy(win->state.term.history[0], "NostaluxOS GUI Terminal");
         str_copy(win->state.term.history[1], "Type 'help' for commands");
+    }
+    else if (type == APP_FILES) {
+        win->state.files.selected_index = -1;
+        win->state.files.scroll_offset = 0;
     }
     
     windows[slot] = win; 
@@ -463,6 +488,45 @@ static void render_settings(Window* w, int cx, int cy) {
     }
 }
 
+static void render_calc(Window* w, int cx, int cy) {
+    char buf[16]; int_to_str(w->state.calc.current_val, buf);
+    draw_bevel_rect(cx+10, cy+10, w->w-20, 30, COL_WHITE, true);
+    graphics_draw_string_scaled(cx+w->w-20-(kstrlen_local(buf)*16), cy+15, buf, COL_BLACK, COL_WHITE, 2);
+    const char* btns[] = {"7","8","9","/", "4","5","6","*", "1","2","3","-", "C","0","=","+"};
+    for(int i=0; i<16; i++) {
+        int bx = cx+10 + (i%4)*40, by = cy+50 + (i/4)*35;
+        bool h = rect_contains(bx, by, 35, 30, mouse.x, mouse.y);
+        bool p = h && mouse.left_button;
+        draw_bevel_rect(bx, by, 35, 30, p?COL_BTN_PRESS:(h?COL_BTN_HOVER:0xFFDDDDDD), p);
+        graphics_draw_char(bx+12+(p?1:0), by+10+(p?1:0), btns[i][0], COL_BLACK, 0);
+    }
+}
+
+static void render_file_manager(Window* w, int cx, int cy) {
+    draw_bevel_rect(cx, cy, w->w-8, w->h-WIN_CAPTION_H-8, COL_WHITE, true);
+    graphics_fill_rect(cx+1, cy+1, w->w-10, 20, 0xFFEEEEEE);
+    graphics_draw_string_scaled(cx+5, cy+7, "Name", COL_BLACK, 0xFFEEEEEE, 1);
+    size_t count = fs_file_count();
+    for (size_t i = 0; i < count; i++) {
+        const struct fs_file* f = fs_file_at(i); if(!f) continue;
+        int ry = cy + 24 + i*18; if(ry > cy+w->h-40) break;
+        bool s = ((int)i == w->state.files.selected_index);
+        if (s) graphics_fill_rect(cx+2, ry, w->w-12, 18, 0xFF316AC5);
+        graphics_draw_string_scaled(cx+20, ry+4, f->name, s?COL_WHITE:COL_BLACK, s?0xFF316AC5:COL_WHITE, 1);
+        char sb[16]; int_to_str(f->size, sb);
+        graphics_draw_string_scaled(cx+w->w-60, ry+4, sb, s?COL_WHITE:COL_BLACK, s?0xFF316AC5:COL_WHITE, 1);
+    }
+}
+
+static void render_system_info(Window* w, int cx, int cy) {
+    (void)w;
+    graphics_draw_string_scaled(cx+20, cy+20, "NostaluxOS v1.0", COL_BLACK, COL_WIN_BODY, 2);
+    const struct system_profile* p = system_profile_info();
+    char mem[32]; int_to_str(p->memory_total_kb / 1024, mem);
+    graphics_draw_string_scaled(cx+20, cy+60, "Memory: ", 0xFF555555, COL_WIN_BODY, 1);
+    graphics_draw_string_scaled(cx+90, cy+60, mem, COL_BLACK, COL_WIN_BODY, 1);
+}
+
 static void render_window(Window* w) {
     if (!w || !w->visible || w->minimized) return;
     if (!w->maximized) graphics_fill_rect(w->x+4, w->y+4, w->w, w->h, 0x50000000); // Shadow
@@ -493,7 +557,7 @@ static void render_window(Window* w) {
     int cx = w->x+4, cy = w->y+WIN_CAPTION_H+4;
     if (w->type == APP_NOTEPAD) render_notepad(w, cx, cy);
     else if (w->type == APP_CALC) render_calc(w, cx, cy);
-    else if (w->type == APP_FILES) render_file_manager(w, cx, cy); // Defined in previous but reused
+    else if (w->type == APP_FILES) render_file_manager(w, cx, cy); 
     else if (w->type == APP_SETTINGS) render_settings(w, cx, cy);
     else if (w->type == APP_TERMINAL) render_terminal(w, cx, cy);
     else render_system_info(w, cx, cy);
