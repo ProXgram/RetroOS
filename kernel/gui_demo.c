@@ -39,7 +39,7 @@ static uint32_t desktop_col_top = 0xFF2D73A8; // Default Blue
 static uint32_t desktop_col_bot = 0xFF103050;
 
 // --- Types ---
-typedef enum { APP_NONE, APP_WELCOME, APP_NOTEPAD, APP_CALC, APP_FILES, APP_SETTINGS } AppType;
+typedef enum { APP_NONE, APP_WELCOME, APP_NOTEPAD, APP_CALC, APP_FILES, APP_SETTINGS, APP_TERMINAL } AppType;
 
 typedef struct {
     int current_val;
@@ -63,6 +63,13 @@ typedef struct {
 } SettingsState;
 
 typedef struct {
+    char prompt[16];
+    char input[64];
+    int input_len;
+    char history[5][64]; // Last 5 lines of output
+} TerminalState;
+
+typedef struct {
     int id;
     AppType type;
     char title[32];
@@ -80,6 +87,7 @@ typedef struct {
         NotepadState notepad; 
         FileManagerState files;
         SettingsState settings;
+        TerminalState term;
     } state;
 } Window;
 
@@ -93,6 +101,8 @@ static MouseState prev_mouse;
 static void render_system_info(Window* w, int cx, int cy);
 static void handle_calc_logic(Window* w, char key);
 static void handle_settings_click(Window* w, int x, int y);
+static void handle_terminal_input(Window* w, char c);
+static void render_terminal(Window* w, int cx, int cy);
 static void toggle_maximize(Window* w);
 static void close_window(int index);
 static int focus_window(int index);
@@ -138,7 +148,7 @@ static bool rect_contains(int x, int y, int w, int h, int px, int py) {
     return (px >= x && px < x + w && py >= y && py < y + h);
 }
 static void str_copy(char* dest, const char* src) {
-    int i = 0; while (src[i] && i < 31) { dest[i] = src[i]; i++; } dest[i] = 0;
+    int i = 0; while (src[i] && i < 63) { dest[i] = src[i]; i++; } dest[i] = 0;
 }
 static void int_to_str(int v, char* buf) {
     if (v == 0) { buf[0] = '0'; buf[1] = 0; return; }
@@ -179,7 +189,6 @@ static void create_window(AppType type, const char* title, int w, int h) {
     win->id = slot; win->type = type; str_copy(win->title, title);
     win->w = w; win->h = h; win->x = 40 + (slot*20)%160; win->y = 40 + (slot*20)%160;
     
-    // Fixed indentation warning
     if (win->x + w > screen_w) win->x = 20; 
     if (win->y + h > screen_h - TASKBAR_H) win->y = 20;
     
@@ -187,6 +196,15 @@ static void create_window(AppType type, const char* title, int w, int h) {
     if (type == APP_NOTEPAD) { win->state.notepad.length = 0; win->state.notepad.buffer[0] = 0; }
     else if (type == APP_CALC) { win->state.calc.current_val = 0; win->state.calc.new_entry = true; }
     else if (type == APP_FILES) { win->state.files.selected_index = -1; win->state.files.scroll_offset = 0; }
+    else if (type == APP_TERMINAL) {
+        str_copy(win->state.term.prompt, "> ");
+        win->state.term.input[0] = 0;
+        win->state.term.input_len = 0;
+        for(int k=0; k<5; k++) win->state.term.history[k][0] = 0;
+        str_copy(win->state.term.history[0], "Nostalux Shell v1.0");
+        str_copy(win->state.term.history[1], "Type 'help' for cmds");
+    }
+    
     windows[slot] = win; focus_window(slot);
 }
 
@@ -244,6 +262,28 @@ static void render_file_manager(Window* w, int cx, int cy) {
         graphics_draw_string_scaled(cx+w->w-60, ry+4, sb, s?COL_WHITE:COL_BLACK, s?0xFF316AC5:COL_WHITE, 1);
     }
 }
+static void render_terminal(Window* w, int cx, int cy) {
+    // Black Background
+    graphics_fill_rect(cx, cy, w->w-8, w->h-WIN_CAPTION_H-8, COL_BLACK);
+    
+    // Draw history
+    uint32_t green = 0xFF00FF00;
+    for(int i=0; i<5; i++) {
+        graphics_draw_string_scaled(cx+4, cy+4+(i*10), w->state.term.history[i], green, COL_BLACK, 1);
+    }
+    
+    // Draw Prompt + Input
+    int input_y = cy + 4 + (5*10);
+    graphics_draw_string_scaled(cx+4, input_y, w->state.term.prompt, green, COL_BLACK, 1);
+    graphics_draw_string_scaled(cx+20, input_y, w->state.term.input, COL_WHITE, COL_BLACK, 1);
+    
+    // Cursor
+    if ((timer_get_ticks() / 15) % 2) {
+        int cursor_x = cx + 20 + (w->state.term.input_len * 8);
+        graphics_fill_rect(cursor_x, input_y, 8, 8, green);
+    }
+}
+
 static void render_settings(Window* w, int cx, int cy) {
     draw_bevel_rect(cx, cy, w->w-8, w->h-WIN_CAPTION_H-8, COL_WIN_BODY, false);
     
@@ -325,6 +365,7 @@ static void render_window(Window* w) {
     else if (w->type == APP_CALC) render_calc(w, cx, cy);
     else if (w->type == APP_FILES) render_file_manager(w, cx, cy);
     else if (w->type == APP_SETTINGS) render_settings(w, cx, cy);
+    else if (w->type == APP_TERMINAL) render_terminal(w, cx, cy);
     else render_system_info(w, cx, cy);
 }
 
@@ -344,13 +385,20 @@ static void render_cursor(void) {
 static void render_desktop(void) {
     draw_gradient_rect(0, 0, screen_w, screen_h - TASKBAR_H, desktop_col_top, desktop_col_bot);
     
+    // "Click to capture" hint
+    graphics_draw_string_scaled(screen_w - 220, 10, "Click screen to capture mouse", 0x80FFFFFF, 0, 1);
+
     struct { int x, y; const char* lbl; } icons[] = {
-        {20, 20, "My PC"}, {20, 80, "My Files"}, {20, 140, "Notepad"}, {20, 200, "Calc"}
+        {20, 20, "Terminal"}, {20, 80, "My Files"}, {20, 140, "Notepad"}, {20, 200, "Calc"}
     };
     for (int i=0; i<4; i++) {
         bool h = rect_contains(icons[i].x, icons[i].y, 64, 55, mouse.x, mouse.y);
         if (h) graphics_fill_rect(icons[i].x, icons[i].y, 64, 55, 0x40FFFFFF);
-        graphics_fill_rect(icons[i].x+16, icons[i].y+5, 32, 28, 0xFFEEEEEE);
+        // If it's terminal, use black screen icon
+        uint32_t icol = (i==0) ? COL_BLACK : 0xFFEEEEEE;
+        graphics_fill_rect(icons[i].x+16, icons[i].y+5, 32, 28, icol);
+        if (i==0) graphics_draw_string_scaled(icons[i].x+18, icons[i].y+7, ">_", COL_00FF00, COL_BLACK, 1);
+        
         graphics_draw_string_scaled(icons[i].x+5, icons[i].y+40, icons[i].lbl, COL_WHITE, 0, 1);
     }
 
@@ -382,7 +430,7 @@ static void render_desktop(void) {
         draw_bevel_rect(0, my, 160, mh, COL_WIN_BODY, false);
         graphics_fill_rect(0, my, 24, mh, COL_START_BTN);
         struct { int y; const char* lbl; } items[] = {
-            {my+10, "My PC"}, {my+40, "File Explorer"}, {my+80, "Notepad"}, 
+            {my+10, "Terminal"}, {my+40, "File Explorer"}, {my+80, "Notepad"}, 
             {my+110, "Calculator"}, {my+150, "Settings"}, {my+240, "Shutdown"}
         };
         for(int i=0; i<6; i++) {
@@ -432,7 +480,7 @@ static void on_click(int x, int y) {
     if (start_menu_open) {
         int my = ty - 280;
         if (x < 160 && y > my) {
-            if (rect_contains(0, my+10, 160, 24, x, y)) create_window(APP_WELCOME, "My PC", 300, 200);
+            if (rect_contains(0, my+10, 160, 24, x, y)) create_window(APP_TERMINAL, "Terminal", 320, 240);
             else if (rect_contains(0, my+40, 160, 24, x, y)) create_window(APP_FILES, "File Explorer", 400, 300);
             else if (rect_contains(0, my+80, 160, 24, x, y)) create_window(APP_NOTEPAD, "Notepad", 300, 200);
             else if (rect_contains(0, my+110, 160, 24, x, y)) create_window(APP_CALC, "Calculator", 220, 300);
@@ -484,7 +532,7 @@ static void on_click(int x, int y) {
         }
     }
 
-    if (rect_contains(20, 20, 64, 55, x, y)) create_window(APP_WELCOME, "My PC", 300, 200);
+    if (rect_contains(20, 20, 64, 55, x, y)) create_window(APP_TERMINAL, "Terminal", 320, 240);
     else if (rect_contains(20, 80, 64, 55, x, y)) create_window(APP_FILES, "File Explorer", 400, 300);
     else if (rect_contains(20, 140, 64, 55, x, y)) create_window(APP_NOTEPAD, "Notepad", 300, 200);
     else if (rect_contains(20, 200, 64, 55, x, y)) create_window(APP_CALC, "Calc", 220, 300);
@@ -518,6 +566,37 @@ static void handle_calc_logic(Window* w, char key) {
     }
 }
 
+static void handle_terminal_input(Window* w, char c) {
+    TerminalState* ts = &w->state.term;
+    if (c == '\n') {
+        // Scroll history
+        for (int i=0; i<4; i++) str_copy(ts->history[i], ts->history[i+1]);
+        str_copy(ts->history[4], ts->input);
+        
+        // Execute simple commands
+        if (kstrcmp(ts->input, "exit") == 0) { close_window(w->id); return; }
+        else if (kstrcmp(ts->input, "cls") == 0) {
+            for(int i=0; i<5; i++) ts->history[i][0] = 0;
+        }
+        else if (kstrcmp(ts->input, "help") == 0) {
+            for (int i=0; i<4; i++) str_copy(ts->history[i], ts->history[i+1]);
+            str_copy(ts->history[4], "cmds: help, cls, exit");
+        }
+        else if (ts->input_len > 0) {
+            for (int i=0; i<4; i++) str_copy(ts->history[i], ts->history[i+1]);
+            str_copy(ts->history[4], "Unknown command.");
+        }
+        
+        ts->input[0] = 0;
+        ts->input_len = 0;
+    } else if (c == '\b') {
+        if (ts->input_len > 0) ts->input[--ts->input_len] = 0;
+    } else if (c >= 32 && c <= 126 && ts->input_len < 60) {
+        ts->input[ts->input_len++] = c;
+        ts->input[ts->input_len] = 0;
+    }
+}
+
 static void toggle_maximize(Window* w) {
     if (w->maximized) {
         w->x = w->restore_x; w->y = w->restore_y; w->w = w->restore_w; w->h = w->restore_h;
@@ -545,10 +624,14 @@ void gui_demo_run(void) {
         if (c == 27) running = false;
         
         Window* top = get_top_window();
-        if (c && top && top->visible && !top->minimized && top->type == APP_NOTEPAD) {
-            NotepadState* ns = &top->state.notepad;
-            if (c == '\b') { if (ns->length > 0) ns->buffer[--ns->length] = 0; }
-            else if (c >= 32 && c <= 126 && ns->length < 250) { ns->buffer[ns->length++] = c; ns->buffer[ns->length] = 0; }
+        if (c && top && top->visible && !top->minimized) {
+            if (top->type == APP_NOTEPAD) {
+                NotepadState* ns = &top->state.notepad;
+                if (c == '\b') { if (ns->length > 0) ns->buffer[--ns->length] = 0; }
+                else if (c >= 32 && c <= 126 && ns->length < 250) { ns->buffer[ns->length++] = c; ns->buffer[ns->length] = 0; }
+            } else if (top->type == APP_TERMINAL) {
+                handle_terminal_input(top, c);
+            }
         }
 
         prev_mouse = mouse; mouse = mouse_get_state();
