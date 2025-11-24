@@ -2,7 +2,7 @@
 #include "io.h"
 #include "syslog.h"
 #include "interrupts.h"
-#include "scheduler.h" // Hook scheduler
+#include "scheduler.h"
 #include <stddef.h> 
 
 #define PIT_FREQUENCY 1193180
@@ -27,13 +27,10 @@ void timer_set_callback(timer_callback_t callback) {
 void timer_handler(void) {
     g_ticks++;
     
-    // Legacy animation callback (still useful for background)
     if (g_callback != NULL && (g_ticks % 4 == 0)) {
         g_callback();
     }
 
-    // Preemptive Scheduler Tick
-    // Switch task every 2 ticks (20ms approx)
     if (g_ticks % 2 == 0) {
         schedule();
     }
@@ -42,8 +39,8 @@ void timer_handler(void) {
 void timer_wait(int ticks) {
     uint64_t end = g_ticks + ticks;
     while (g_ticks < end) {
-        // 'hlt' causes a GPF in Ring 3. We use 'pause' instead for busy-waiting compatibility.
-        // Ideally, we would yield() here, but we rely on the preemptive tick to switch tasks.
+        // FIX: Use 'pause' instead of 'hlt'. 
+        // 'hlt' is privileged and will crash User Mode programs (Ring 3).
         __asm__ volatile("pause");
     }
 }
