@@ -33,6 +33,7 @@
 #define COL_RED         0xFFE81123
 #define COL_RED_HOVER   0xFFFF4444
 #define COL_GRAY        0xFFCCCCCC
+#define COL_GREEN       0xFF00FF00
 
 // --- Global Desktop Appearance ---
 static uint32_t desktop_col_top = 0xFF2D73A8; // Default Blue
@@ -267,20 +268,19 @@ static void render_terminal(Window* w, int cx, int cy) {
     graphics_fill_rect(cx, cy, w->w-8, w->h-WIN_CAPTION_H-8, COL_BLACK);
     
     // Draw history
-    uint32_t green = 0xFF00FF00;
     for(int i=0; i<5; i++) {
-        graphics_draw_string_scaled(cx+4, cy+4+(i*10), w->state.term.history[i], green, COL_BLACK, 1);
+        graphics_draw_string_scaled(cx+4, cy+4+(i*10), w->state.term.history[i], COL_GREEN, COL_BLACK, 1);
     }
     
     // Draw Prompt + Input
     int input_y = cy + 4 + (5*10);
-    graphics_draw_string_scaled(cx+4, input_y, w->state.term.prompt, green, COL_BLACK, 1);
+    graphics_draw_string_scaled(cx+4, input_y, w->state.term.prompt, COL_GREEN, COL_BLACK, 1);
     graphics_draw_string_scaled(cx+20, input_y, w->state.term.input, COL_WHITE, COL_BLACK, 1);
     
     // Cursor
     if ((timer_get_ticks() / 15) % 2) {
         int cursor_x = cx + 20 + (w->state.term.input_len * 8);
-        graphics_fill_rect(cursor_x, input_y, 8, 8, green);
+        graphics_fill_rect(cursor_x, input_y, 8, 8, COL_GREEN);
     }
 }
 
@@ -397,7 +397,7 @@ static void render_desktop(void) {
         // If it's terminal, use black screen icon
         uint32_t icol = (i==0) ? COL_BLACK : 0xFFEEEEEE;
         graphics_fill_rect(icons[i].x+16, icons[i].y+5, 32, 28, icol);
-        if (i==0) graphics_draw_string_scaled(icons[i].x+18, icons[i].y+7, ">_", COL_00FF00, COL_BLACK, 1);
+        if (i==0) graphics_draw_string_scaled(icons[i].x+18, icons[i].y+7, ">_", COL_GREEN, COL_BLACK, 1);
         
         graphics_draw_string_scaled(icons[i].x+5, icons[i].y+40, icons[i].lbl, COL_WHITE, 0, 1);
     }
