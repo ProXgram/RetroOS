@@ -15,19 +15,21 @@ section .text
     extern __bss_end
     extern g_kernel_stack_top
     extern syscall_dispatcher
-And that just came from
+
 _start:
     cli
     mov rbp, 0
     and rsp, -16
     sub rsp, 8
 
+    ; Load kernel stack
     mov rsp, [g_kernel_stack_top]
     and rsp, -16
     sub rsp, 8
 
-    mov r12, rdi ; BootInfo
+    mov r12, rdi ; Save BootInfo pointer (passed in RDI)
 
+    ; Zero out BSS
     mov rdi, __bss_start
     mov rcx, __bss_end
     sub rcx, rdi
@@ -97,15 +99,8 @@ isr_syscall:
     push rcx
     push rbx
     
-    ; 2. Prepare Arguments for C function
-    ; System V AMD64 ABI:
-    ; rdi, rsi, rdx, rcx, r8, r9
-    ; The user puts args in:
-    ; rax (syscall #), rdi, rsi, rdx, r10, r8, r9
-    ; We need to move them to match C calling convention if needed,
-    ; but for now we pass the stack pointer to the dispatcher.
-    
-    mov rdi, rsp ; Pass pointer to struct registers
+    ; 2. Pass stack pointer (regs) to C function
+    mov rdi, rsp 
     
     ; 3. Call Kernel Dispatcher
     call syscall_dispatcher
