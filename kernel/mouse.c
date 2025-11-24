@@ -77,16 +77,26 @@ void mouse_init(void) {
 
 void mouse_handle_interrupt(void) {
     uint8_t status = inb(MOUSE_PORT_STATUS);
-    if (!(status & 0x20)) return; // Was not mouse
+    // Check if the interrupt is actually from the mouse (Auxiliary Device)
+    // Bit 5 (0x20) of status register is 1 if data comes from mouse
+    if (!(status & 0x20)) {
+        // If interrupt fired but status says it's not mouse, it might be stray keyboard data?
+        // Just read it to clear it if buffer is full
+        if (status & 0x01) inb(MOUSE_PORT_DATA);
+        return; 
+    }
 
     uint8_t b = inb(MOUSE_PORT_DATA);
 
     switch(g_mouse_cycle) {
         case 0:
-            if ((b & 0x08) == 0x08) { // Align bit must be 1
+            // Byte 0: Y overflow, X overflow, Y sign, X sign, 1, Middle, Right, Left
+            // Bit 3 must be 1 for a standard packet.
+            if ((b & 0x08) == 0x08) { 
                 g_mouse_byte[0] = b;
                 g_mouse_cycle++;
             }
+            // If bit 3 isn't 1, we are out of sync. Remain in cycle 0.
             break;
         case 1:
             g_mouse_byte[1] = b;
@@ -97,23 +107,38 @@ void mouse_handle_interrupt(void) {
             g_mouse_cycle = 0;
 
             // Packet ready
+            // Note: PS/2 values are 9-bit two's complement stored in 8 bits + sign bit in byte 0.
+            // However, standard cast usually works for small movements.
+            // Let's use the sign bits for robustness.
+            
             int dx = (int8_t)g_mouse_byte[1];
             int dy = (int8_t)g_mouse_byte[2];
             
-            // Standard PS/2 mouse Y is inverted relative to screen
-            g_mouse_x += dx;
-            g_mouse_y -= dy; 
+            // Overflow bits
+            bool x_ovf = (g_mouse_byte[0] & 0x40) != 0;
+            bool y_ovf = (g_mouse_byte[0] & 0x80) != 0;
 
-            // Clamp to screen
-            int w = graphics_get_width();
-            int h = graphics_get_height();
-            if (g_mouse_x < 0) g_mouse_x = 0;
-            if (g_mouse_x >= w) g_mouse_x = w - 1;
-            if (g_mouse_y < 0) g_mouse_y = 0;
-            if (g_mouse_y >= h) g_mouse_y = h - 1;
+            if (!x_ovf && !y_ovf) {
+                // Standard PS/2 mouse Y is inverted relative to screen (Up is positive in math, but lower pixel Y)
+                // Wait, in PS/2:
+                // Byte 1: X movement
+                // Byte 2: Y movement (Positive = Up)
+                // Screen Y increases Down. So we subtract dy.
+                
+                g_mouse_x += dx;
+                g_mouse_y -= dy; 
 
-            g_left_btn = (g_mouse_byte[0] & 0x01) != 0;
-            g_right_btn = (g_mouse_byte[0] & 0x02) != 0;
+                // Clamp to screen
+                int w = graphics_get_width();
+                int h = graphics_get_height();
+                if (g_mouse_x < 0) g_mouse_x = 0;
+                if (g_mouse_x >= w) g_mouse_x = w - 1;
+                if (g_mouse_y < 0) g_mouse_y = 0;
+                if (g_mouse_y >= h) g_mouse_y = h - 1;
+
+                g_left_btn = (g_mouse_byte[0] & 0x01) != 0;
+                g_right_btn = (g_mouse_byte[0] & 0x02) != 0;
+            }
             break;
     }
 }
