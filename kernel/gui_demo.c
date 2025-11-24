@@ -17,19 +17,26 @@
 // We rely on Syscalls.
 
 static void syscall_shutdown(void) {
+    register uint64_t syscall_no asm("rdi") = 4;
     __asm__ volatile(
-        "mov $4, %%rdi\n" // Syscall 4 = Shutdown
         "int $0x80\n"
-        : : : "rdi", "memory"
+        : 
+        : "r"(syscall_no)
+        : "memory"
     );
 }
 
 static void syscall_get_mouse(MouseState* out) {
+    // We use register variables to ensure values are in the right place
+    // BEFORE the interrupt, preventing clobbering during setup.
+    register uint64_t syscall_no asm("rdi") = 5;
+    register MouseState* ptr asm("rsi") = out;
+
     __asm__ volatile(
-        "mov $5, %%rdi\n" // Syscall 5 = Get Mouse
-        "mov %0, %%rsi\n" // Arg 2 = Pointer to struct
         "int $0x80\n"
-        : : "r"(out) : "rdi", "rsi", "memory"
+        : 
+        : "r"(syscall_no), "r"(ptr)
+        : "memory"
     );
 }
 
@@ -304,9 +311,29 @@ static void render_settings(Window* w, int cx, int cy) {
     for (int i = 0; i < 4; i++) {
         int bx = cx + 10 + (i * 40);
         int by = cy + 30;
+        
         bool h = rect_contains(bx, by, 30, 30, mouse.x, mouse.y);
         if (h) graphics_fill_rect(bx-2, by-2, 34, 34, COL_BLACK); // Highlight
         graphics_fill_rect(bx, by, 30, 30, colors[i]);
+    }
+
+    // Mouse Sensitivity
+    graphics_draw_string_scaled(cx+10, cy+80, "Mouse Speed:", COL_BLACK, COL_WIN_BODY, 1);
+    // We don't have a direct way to read sens via syscall yet without extending struct, 
+    // but we can just draw the buttons.
+    const char* speeds[] = { "Slow", "Med", "Fast" };
+    int sense_map[] = { 1, 2, 4 };
+    // Hack: assume sensitivity matches what we last set or default
+    int current = 1; // Default visual
+    
+    for (int i = 0; i < 3; i++) {
+        int bx = cx + 10 + (i * 60);
+        int by = cy + 100;
+        bool h = rect_contains(bx, by, 50, 24, mouse.x, mouse.y);
+        bool p = h && mouse.left_button;
+        
+        draw_bevel_rect(bx, by, 50, 24, h ? COL_BTN_HOVER : 0xFFDDDDDD, p);
+        graphics_draw_string_scaled(bx+10, by+8, speeds[i], COL_BLACK, h ? COL_BTN_HOVER : 0xFFDDDDDD, 1);
     }
 }
 
@@ -417,7 +444,7 @@ static void render_desktop(void) {
 
     if (start_menu_open) {
         int mh = 280, my = ty - mh;
-        draw_bevel_rect(0, my, 160, mh, COL_WIN_BODY, false);
+        draw_bevel_rect(0, my, 160, 200, COL_WIN_BODY, false);
         graphics_fill_rect(0, my, 24, mh, COL_START_BTN);
         struct { int y; const char* lbl; } items[] = {
             {my+10, "Terminal"}, {my+40, "File Explorer"}, {my+80, "Notepad"}, 
