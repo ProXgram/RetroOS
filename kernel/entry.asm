@@ -4,6 +4,8 @@ section .text
     global _start
     global context_switch
     global _iret_stub
+    global isr_syscall
+    
     extern kmain
     extern gdt_init
     extern interrupts_init
@@ -12,7 +14,8 @@ section .text
     extern __bss_start
     extern __bss_end
     extern g_kernel_stack_top
-
+    extern syscall_dispatcher
+And that just came from
 _start:
     cli
     mov rbp, 0
@@ -72,4 +75,55 @@ context_switch:
 
 ; Used by spawn_user_task to exit kernel mode
 _iret_stub:
+    iretq
+
+; ---------------------------------------------
+; System Call Entry Point (INT 0x80)
+; ---------------------------------------------
+isr_syscall:
+    ; 1. Save User State
+    push rbp
+    push r15
+    push r14
+    push r13
+    push r12
+    push r11
+    push r10
+    push r9
+    push r8
+    push rdi
+    push rsi
+    push rdx
+    push rcx
+    push rbx
+    
+    ; 2. Prepare Arguments for C function
+    ; System V AMD64 ABI:
+    ; rdi, rsi, rdx, rcx, r8, r9
+    ; The user puts args in:
+    ; rax (syscall #), rdi, rsi, rdx, r10, r8, r9
+    ; We need to move them to match C calling convention if needed,
+    ; but for now we pass the stack pointer to the dispatcher.
+    
+    mov rdi, rsp ; Pass pointer to struct registers
+    
+    ; 3. Call Kernel Dispatcher
+    call syscall_dispatcher
+    
+    ; 4. Restore User State
+    pop rbx
+    pop rcx
+    pop rdx
+    pop rsi
+    pop rdi
+    pop r8
+    pop r9
+    pop r10
+    pop r11
+    pop r12
+    pop r13
+    pop r14
+    pop r15
+    pop rbp
+    
     iretq
