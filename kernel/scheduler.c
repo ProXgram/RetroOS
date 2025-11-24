@@ -77,8 +77,14 @@ void spawn_user_task(void (*entry_point)(void)) {
     *(--sp) = 0x18 | 3; 
     // RSP (User Stack Pointer)
     *(--sp) = (uint64_t)(ustack + STACK_SIZE);
-    // RFLAGS (Interrupts Enabled)
-    *(--sp) = 0x202; 
+    
+    // RFLAGS
+    // 0x200 = Interrupts Enabled
+    // 0x3000 = IOPL 3 (Allows Ring 3 to use IO ports/CLI/STI)
+    // 0x002 = Reserved bit (must be 1)
+    // Total: 0x3202
+    *(--sp) = 0x3202; 
+    
     // CS (User Code Selector | RPL 3)
     *(--sp) = 0x20 | 3;
     // RIP (Entry Point)
