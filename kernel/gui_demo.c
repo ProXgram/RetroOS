@@ -9,7 +9,7 @@
 #include "kstdio.h"
 #include "fs.h"
 #include "system.h"
-#include "heap.h"  // REQUIRED for kmalloc/kfree
+#include "heap.h"
 #include <stdbool.h>
 
 // --- Configuration ---
@@ -18,8 +18,6 @@
 #define TASKBAR_H 34
 
 // --- Colors ---
-#define COL_DESKTOP_TOP 0xFF2D73A8
-#define COL_DESKTOP_BOT 0xFF103050
 #define COL_TASKBAR     0xFF18334E
 #define COL_START_BTN   0xFF1F4E79
 #define COL_START_HOVER 0xFF3465A4
@@ -36,8 +34,12 @@
 #define COL_RED_HOVER   0xFFFF4444
 #define COL_GRAY        0xFFCCCCCC
 
+// --- Global Desktop Appearance ---
+static uint32_t desktop_col_top = 0xFF2D73A8; // Default Blue
+static uint32_t desktop_col_bot = 0xFF103050;
+
 // --- Types ---
-typedef enum { APP_NONE, APP_WELCOME, APP_NOTEPAD, APP_CALC, APP_FILES } AppType;
+typedef enum { APP_NONE, APP_WELCOME, APP_NOTEPAD, APP_CALC, APP_FILES, APP_SETTINGS } AppType;
 
 typedef struct {
     int current_val;
@@ -57,19 +59,19 @@ typedef struct {
 } FileManagerState;
 
 typedef struct {
+    int dummy; // Reserved for future state
+} SettingsState;
+
+typedef struct {
     int id;
     AppType type;
     char title[32];
     int x, y, w, h;
-    
-    // State flags
     bool visible;
     bool minimized;
     bool maximized;
     bool focused;
     bool dragging;
-    
-    // For dragging/restoring
     int drag_off_x, drag_off_y;
     int restore_x, restore_y, restore_w, restore_h;
 
@@ -77,21 +79,17 @@ typedef struct {
         CalcState calc; 
         NotepadState notepad; 
         FileManagerState files;
+        SettingsState settings;
     } state;
 } Window;
 
-// --- State ---
-// Array of pointers to windows.
 static Window* windows[MAX_WINDOWS];
-
 static bool start_menu_open = false;
 static int screen_w, screen_h;
 static MouseState mouse;
 static MouseState prev_mouse;
 
-// --- Cursor Bitmap ---
-// 12x19 Arrow Cursor
-// 0 = Transparent, 1 = Black Border, 2 = White Fill
+// --- Cursor Bitmap (Arrow) ---
 static const uint8_t CURSOR_BITMAP[19][12] = {
     {1,1,0,0,0,0,0,0,0,0,0,0},
     {1,2,1,0,0,0,0,0,0,0,0,0},
@@ -114,425 +112,282 @@ static const uint8_t CURSOR_BITMAP[19][12] = {
     {0,0,0,0,0,0,1,1,0,0,0,0}
 };
 
-// --- RTC Helper ---
+// --- RTC ---
 #define CMOS_ADDRESS 0x70
 #define CMOS_DATA    0x71
-
-static uint8_t get_rtc_register(int reg) {
-    outb(CMOS_ADDRESS, (uint8_t)reg);
-    return inb(CMOS_DATA);
-}
-
+static uint8_t get_rtc_register(int reg) { outb(CMOS_ADDRESS, (uint8_t)reg); return inb(CMOS_DATA); }
 static void get_time_string(char* buf) {
-    int timeout = 1000;
-    while ((get_rtc_register(0x0A) & 0x80) && timeout-- > 0);
-    
-    uint8_t min = get_rtc_register(0x02);
-    uint8_t hour = get_rtc_register(0x04);
-    
-    min = (min & 0x0F) + ((min / 16) * 10);
-    hour = ((hour & 0x0F) + ((hour / 16) * 10));
-    
-    buf[0] = '0' + (hour / 10);
-    buf[1] = '0' + (hour % 10);
-    buf[2] = ':';
-    buf[3] = '0' + (min / 10);
-    buf[4] = '0' + (min % 10);
-    buf[5] = 0;
+    int timeout = 1000; while ((get_rtc_register(0x0A) & 0x80) && timeout-- > 0);
+    uint8_t min = get_rtc_register(0x02); uint8_t hour = get_rtc_register(0x04);
+    min = (min & 0x0F) + ((min / 16) * 10); hour = ((hour & 0x0F) + ((hour / 16) * 10));
+    buf[0] = '0' + (hour / 10); buf[1] = '0' + (hour % 10); buf[2] = ':';
+    buf[3] = '0' + (min / 10); buf[4] = '0' + (min % 10); buf[5] = 0;
 }
 
 // --- Helpers ---
 static bool rect_contains(int x, int y, int w, int h, int px, int py) {
     return (px >= x && px < x + w && py >= y && py < y + h);
 }
-
 static void str_copy(char* dest, const char* src) {
-    int i = 0;
-    while (src[i] && i < 31) { dest[i] = src[i]; i++; }
-    dest[i] = 0;
+    int i = 0; while (src[i] && i < 31) { dest[i] = src[i]; i++; } dest[i] = 0;
 }
-
 static void int_to_str(int v, char* buf) {
     if (v == 0) { buf[0] = '0'; buf[1] = 0; return; }
-    bool neg = v < 0;
-    if (neg) v = -v;
-    int i = 0; char tmp[16];
-    while (v > 0) { tmp[i++] = '0' + (v % 10); v /= 10; }
+    bool neg = v < 0; if (neg) v = -v;
+    int i = 0; char tmp[16]; while (v > 0) { tmp[i++] = '0' + (v % 10); v /= 10; }
     if (neg) tmp[i++] = '-';
-    int j = 0;
-    while (i > 0) buf[j++] = tmp[--i];
-    buf[j] = 0;
+    int j = 0; while (i > 0) buf[j++] = tmp[--i]; buf[j] = 0;
 }
 
-// --- Window Management (Pointer based) ---
-
+// --- Window Management ---
 static Window* get_top_window(void) {
-    for (int i = MAX_WINDOWS - 1; i >= 0; i--) {
-        if (windows[i] != NULL) return windows[i];
-    }
-    return NULL;
+    for (int i = MAX_WINDOWS - 1; i >= 0; i--) { if (windows[i] != NULL) return windows[i]; } return NULL;
 }
-
-// Returns the new index of the focused window
 static int focus_window(int index) {
-    if (index < 0 || index >= MAX_WINDOWS) return -1;
-    if (windows[index] == NULL) return -1;
-
+    if (index < 0 || index >= MAX_WINDOWS || windows[index] == NULL) return -1;
     Window* target = windows[index];
-    
-    // Bubble up the window to the highest non-null slot
     int i = index;
-    while (i < MAX_WINDOWS - 1 && windows[i+1] != NULL) {
-        windows[i] = windows[i+1];
-        i++;
-    }
-    
+    while (i < MAX_WINDOWS - 1 && windows[i+1] != NULL) { windows[i] = windows[i+1]; i++; }
     windows[i] = target;
-
-    // Update focus flags
-    for(int j=0; j<MAX_WINDOWS; j++) {
-        if (windows[j]) {
-            windows[j]->focused = (windows[j] == target);
-            if (windows[j]->focused) windows[j]->minimized = false;
-        }
+    for(int j=0; j<MAX_WINDOWS; j++) if(windows[j]) {
+        windows[j]->focused = (windows[j] == target);
+        if (windows[j]->focused) windows[j]->minimized = false;
     }
     return i;
 }
-
 static void close_window(int index) {
     if (index < 0 || index >= MAX_WINDOWS || windows[index] == NULL) return;
-    
-    kfree(windows[index]);
-    windows[index] = NULL;
-
-    // Shift remaining windows down to fill gap
-    for (int i = index; i < MAX_WINDOWS - 1; i++) {
-        windows[i] = windows[i+1];
-    }
+    kfree(windows[index]); windows[index] = NULL;
+    for (int i = index; i < MAX_WINDOWS - 1; i++) windows[i] = windows[i+1];
     windows[MAX_WINDOWS - 1] = NULL;
 }
-
 static void create_window(AppType type, const char* title, int w, int h) {
     int slot = -1;
-    for (int i = 0; i < MAX_WINDOWS; i++) {
-        if (windows[i] == NULL) {
-            slot = i;
-            break;
-        }
-    }
-
-    // If full, close the bottom-most window (index 0)
-    if (slot == -1) {
-        close_window(0);
-        slot = MAX_WINDOWS - 1; // The last slot is now free after shifting
-    }
-
+    for (int i = 0; i < MAX_WINDOWS; i++) { if (windows[i] == NULL) { slot = i; break; } }
+    if (slot == -1) { close_window(0); slot = MAX_WINDOWS - 1; }
     Window* win = (Window*)kmalloc(sizeof(Window));
-    if (!win) {
-        syslog_write("GUI: Memory allocation failed for new window");
-        return;
-    }
-
-    win->id = slot;
-    win->type = type;
-    str_copy(win->title, title);
-    win->w = w; win->h = h;
-    
-    static int cascade = 0;
-    win->x = 40 + cascade;
-    win->y = 40 + cascade;
-    cascade = (cascade + 20) % 160;
-
-    if (win->x + w > screen_w) win->x = 20;
-    if (win->y + h > screen_h - TASKBAR_H) win->y = 20;
-
-    win->visible = true;
-    win->minimized = false;
-    win->maximized = false;
-    win->dragging = false;
-    win->focused = true;
-
-    if (type == APP_NOTEPAD) {
-        win->state.notepad.length = 0;
-        win->state.notepad.buffer[0] = 0;
-    } else if (type == APP_CALC) {
-        win->state.calc.current_val = 0;
-        win->state.calc.new_entry = true;
-    } else if (type == APP_FILES) {
-        win->state.files.selected_index = -1;
-        win->state.files.scroll_offset = 0;
-    }
-
-    windows[slot] = win;
-    focus_window(slot);
+    if (!win) { syslog_write("GUI: OOM"); return; }
+    win->id = slot; win->type = type; str_copy(win->title, title);
+    win->w = w; win->h = h; win->x = 40 + (slot*20)%160; win->y = 40 + (slot*20)%160;
+    if (win->x + w > screen_w) win->x = 20; if (win->y + h > screen_h - TASKBAR_H) win->y = 20;
+    win->visible = true; win->minimized = false; win->maximized = false; win->dragging = false; win->focused = true;
+    if (type == APP_NOTEPAD) { win->state.notepad.length = 0; win->state.notepad.buffer[0] = 0; }
+    else if (type == APP_CALC) { win->state.calc.current_val = 0; win->state.calc.new_entry = true; }
+    else if (type == APP_FILES) { win->state.files.selected_index = -1; win->state.files.scroll_offset = 0; }
+    windows[slot] = win; focus_window(slot);
 }
 
 // --- Drawing ---
-
 static void draw_gradient_rect(int x, int y, int w, int h, uint32_t c1, uint32_t c2) {
     for (int i=0; i<h; i++) {
         uint8_t r1 = (c1 >> 16) & 0xFF, g1 = (c1 >> 8) & 0xFF, b1 = c1 & 0xFF;
         uint8_t r2 = (c2 >> 16) & 0xFF, g2 = (c2 >> 8) & 0xFF, b2 = c2 & 0xFF;
-        
         uint8_t r = r1 + ((int)(r2 - r1) * i) / h;
         uint8_t g = g1 + ((int)(g2 - g1) * i) / h;
         uint8_t b = b1 + ((int)(b2 - b1) * i) / h;
-        
         uint32_t col = 0xFF000000 | (r << 16) | (g << 8) | b;
         graphics_fill_rect(x, y+i, w, 1, col);
     }
 }
-
 static void draw_bevel_rect(int x, int y, int w, int h, uint32_t fill, bool sunk) {
     graphics_fill_rect(x, y, w, h, fill);
     uint32_t tl = sunk ? 0xFF555555 : 0xFFFFFFFF; 
     uint32_t br = sunk ? 0xFFFFFFFF : 0xFF555555; 
-    graphics_fill_rect(x, y, w, 1, tl);      
-    graphics_fill_rect(x, y, 1, h, tl);      
-    graphics_fill_rect(x, y+h-1, w, 1, br);  
-    graphics_fill_rect(x+w-1, y, 1, h, br);  
+    graphics_fill_rect(x, y, w, 1, tl); graphics_fill_rect(x, y, 1, h, tl);      
+    graphics_fill_rect(x, y+h-1, w, 1, br); graphics_fill_rect(x+w-1, y, 1, h, br);  
 }
 
+// --- App Renderers ---
 static void render_notepad(Window* w, int cx, int cy) {
     draw_bevel_rect(cx+2, cy+2, w->w-4, w->h-WIN_CAPTION_H-4, COL_WHITE, true);
     graphics_draw_string_scaled(cx+6, cy+6, w->state.notepad.buffer, COL_BLACK, COL_WHITE, 1);
-    if ((timer_get_ticks() / 15) % 2) {
-        int cur_x = cx + 6 + (w->state.notepad.length * 8);
-        graphics_fill_rect(cur_x, cy+6, 2, 10, COL_BLACK);
-    }
+    if ((timer_get_ticks() / 15) % 2) graphics_fill_rect(cx+6+(w->state.notepad.length*8), cy+6, 2, 10, COL_BLACK);
 }
-
 static void render_calc(Window* w, int cx, int cy) {
-    char buf[16];
-    int_to_str(w->state.calc.current_val, buf);
+    char buf[16]; int_to_str(w->state.calc.current_val, buf);
     draw_bevel_rect(cx+10, cy+10, w->w-20, 30, COL_WHITE, true);
-    int text_w = kstrlen(buf) * 8 * 2;
-    graphics_draw_string_scaled(cx+w->w-20-text_w, cy+15, buf, COL_BLACK, COL_WHITE, 2);
-
+    graphics_draw_string_scaled(cx+w->w-20-(kstrlen(buf)*16), cy+15, buf, COL_BLACK, COL_WHITE, 2);
     const char* btns[] = {"7","8","9","/", "4","5","6","*", "1","2","3","-", "C","0","=","+"};
-    int start_x = cx+10;
-    int start_y = cy+50;
     for(int i=0; i<16; i++) {
-        int r = i/4; int c = i%4;
-        int b_x = start_x + c*40;
-        int b_y = start_y + r*35;
-        bool hover = rect_contains(b_x, b_y, 35, 30, mouse.x, mouse.y);
-        bool press = hover && mouse.left_button;
-        uint32_t btn_col = press ? COL_BTN_PRESS : (hover ? COL_BTN_HOVER : 0xFFDDDDDD);
-        draw_bevel_rect(b_x, b_y, 35, 30, btn_col, press);
-        int tx = b_x + 12; int ty = b_y + 10;
-        if(press) { tx++; ty++; }
-        graphics_draw_char(tx, ty, btns[i][0], COL_BLACK, btn_col);
+        int bx = cx+10 + (i%4)*40, by = cy+50 + (i/4)*35;
+        bool h = rect_contains(bx, by, 35, 30, mouse.x, mouse.y);
+        bool p = h && mouse.left_button;
+        draw_bevel_rect(bx, by, 35, 30, p?COL_BTN_PRESS:(h?COL_BTN_HOVER:0xFFDDDDDD), p);
+        graphics_draw_char(bx+12+(p?1:0), by+10+(p?1:0), btns[i][0], COL_BLACK, 0);
     }
 }
-
 static void render_file_manager(Window* w, int cx, int cy) {
-    int cw = w->w - 8;
-    int ch = w->h - WIN_CAPTION_H - 8;
-    draw_bevel_rect(cx, cy, cw, ch, COL_WHITE, true);
-    graphics_fill_rect(cx+1, cy+1, cw-2, 20, 0xFFEEEEEE);
+    draw_bevel_rect(cx, cy, w->w-8, w->h-WIN_CAPTION_H-8, COL_WHITE, true);
+    graphics_fill_rect(cx+1, cy+1, w->w-10, 20, 0xFFEEEEEE);
     graphics_draw_string_scaled(cx+5, cy+7, "Name", COL_BLACK, 0xFFEEEEEE, 1);
-    graphics_draw_string_scaled(cx+cw-80, cy+7, "Size", COL_BLACK, 0xFFEEEEEE, 1);
-    graphics_fill_rect(cx+1, cy+21, cw-2, 1, 0xFFAAAAAA);
-
     size_t count = fs_file_count();
-    int y_off = 24;
     for (size_t i = 0; i < count; i++) {
-        const struct fs_file* f = fs_file_at(i);
-        if (!f) continue;
-        int row_y = cy + y_off;
-        int row_h = 18;
-        if (row_y + row_h > cy + ch) break;
-
-        bool selected = ((int)i == w->state.files.selected_index);
-        if (selected) graphics_fill_rect(cx+2, row_y, cw-4, row_h, 0xFF316AC5);
-        uint32_t txt_col = selected ? COL_WHITE : COL_BLACK;
-        uint32_t bg_col = selected ? 0xFF316AC5 : COL_WHITE;
-
-        graphics_fill_rect(cx+4, row_y+2, 12, 12, 0xFFFFCC00);
-        graphics_draw_string_scaled(cx+20, row_y+4, f->name, txt_col, bg_col, 1);
-        char size_buf[16]; int_to_str(f->size, size_buf);
-        graphics_draw_string_scaled(cx+cw-80, row_y+4, size_buf, txt_col, bg_col, 1);
-        graphics_draw_string_scaled(cx+cw-40, row_y+4, "B", txt_col, bg_col, 1);
-        y_off += row_h;
+        const struct fs_file* f = fs_file_at(i); if(!f) continue;
+        int ry = cy + 24 + i*18; if(ry > cy+w->h-40) break;
+        bool s = ((int)i == w->state.files.selected_index);
+        if (s) graphics_fill_rect(cx+2, ry, w->w-12, 18, 0xFF316AC5);
+        graphics_draw_string_scaled(cx+20, ry+4, f->name, s?COL_WHITE:COL_BLACK, s?0xFF316AC5:COL_WHITE, 1);
+        char sb[16]; int_to_str(f->size, sb);
+        graphics_draw_string_scaled(cx+w->w-60, ry+4, sb, s?COL_WHITE:COL_BLACK, s?0xFF316AC5:COL_WHITE, 1);
     }
 }
+static void render_settings(Window* w, int cx, int cy) {
+    draw_bevel_rect(cx, cy, w->w-8, w->h-WIN_CAPTION_H-8, COL_WIN_BODY, false);
+    
+    // Background Color Section
+    graphics_draw_string_scaled(cx+10, cy+10, "Background Color:", COL_BLACK, COL_WIN_BODY, 1);
+    
+    uint32_t colors[] = { 0xFF2D73A8, 0xFF2D882D, 0xFF882D2D, 0xFF333333 }; // Blue, Green, Red, Black
+    for (int i = 0; i < 4; i++) {
+        int bx = cx + 10 + (i * 40);
+        int by = cy + 30;
+        
+        bool h = rect_contains(bx, by, 30, 30, mouse.x, mouse.y);
+        if (h) graphics_fill_rect(bx-2, by-2, 34, 34, COL_BLACK); // Highlight
+        graphics_fill_rect(bx, by, 30, 30, colors[i]);
+    }
 
-static void render_system_info(Window* w, int cx, int cy) {
-    (void)w;
-    graphics_draw_string_scaled(cx+20, cy+20, "NostaluxOS v1.0", COL_BLACK, COL_WIN_BODY, 2);
-    const struct system_profile* p = system_profile_info();
-    char mem[32]; int_to_str(p->memory_total_kb / 1024, mem);
-    char res[32]; int_to_str(screen_w, res);
-    graphics_draw_string_scaled(cx+20, cy+60, "Memory: ", 0xFF555555, COL_WIN_BODY, 1);
-    graphics_draw_string_scaled(cx+90, cy+60, mem, COL_BLACK, COL_WIN_BODY, 1);
-    graphics_draw_string_scaled(cx+120, cy+60, "MB", COL_BLACK, COL_WIN_BODY, 1);
-    graphics_draw_string_scaled(cx+20, cy+80, "Display:", 0xFF555555, COL_WIN_BODY, 1);
-    graphics_draw_string_scaled(cx+90, cy+80, res, COL_BLACK, COL_WIN_BODY, 1);
-    graphics_draw_string_scaled(cx+130, cy+80, "px", COL_BLACK, COL_WIN_BODY, 1);
+    // Mouse Sensitivity Section
+    graphics_draw_string_scaled(cx+10, cy+80, "Mouse Speed:", COL_BLACK, COL_WIN_BODY, 1);
+    const char* speeds[] = { "Slow", "Med", "Fast" };
+    int sense_map[] = { 1, 2, 4 };
+    int current = mouse_get_sensitivity();
+    
+    for (int i = 0; i < 3; i++) {
+        int bx = cx + 10 + (i * 60);
+        int by = cy + 100;
+        bool active = (current == sense_map[i]);
+        bool h = rect_contains(bx, by, 50, 24, mouse.x, mouse.y);
+        bool p = h && mouse.left_button;
+        
+        uint32_t col = active ? COL_START_HOVER : (h ? COL_BTN_HOVER : 0xFFDDDDDD);
+        draw_bevel_rect(bx, by, 50, 24, col, active || p);
+        
+        uint32_t txt = active ? COL_WHITE : COL_BLACK;
+        graphics_draw_string_scaled(bx+10, by+8, speeds[i], txt, col, 1);
+    }
 }
 
 static void render_window(Window* w) {
     if (!w || !w->visible || w->minimized) return;
-
-    // Shadow & Body
-    if (!w->maximized) graphics_fill_rect(w->x + 4, w->y + 4, w->w, w->h, 0x50000000);
+    if (!w->maximized) graphics_fill_rect(w->x+4, w->y+4, w->w, w->h, 0x50000000);
     graphics_fill_rect(w->x, w->y, w->w, w->h, COL_WIN_BODY);
     
-    // Title Bar
     uint32_t t1 = w->focused ? COL_WIN_TITLE_1 : COL_WIN_INACT_1;
     uint32_t t2 = w->focused ? COL_WIN_TITLE_2 : COL_WIN_INACT_2;
     draw_gradient_rect(w->x+3, w->y+3, w->w-6, WIN_CAPTION_H, t1, t2);
     graphics_draw_string_scaled(w->x+8, w->y+8, w->title, COL_WHITE, t1, 1);
 
-    // Controls
-    int btn_y = w->y + 5;
-    int close_x = w->x + w->w - 25;
+    int bx = w->x+w->w-25;
+    bool hc = rect_contains(bx, w->y+5, 20, 18, mouse.x, mouse.y);
+    draw_bevel_rect(bx, w->y+5, 20, 18, hc?COL_RED_HOVER:COL_RED, false);
+    graphics_draw_char(bx+6, w->y+10, 'X', COL_WHITE, hc?COL_RED_HOVER:COL_RED);
     
-    // Close
-    bool h_close = rect_contains(close_x, btn_y, 20, 18, mouse.x, mouse.y);
-    draw_bevel_rect(close_x, btn_y, 20, 18, h_close ? COL_RED_HOVER : COL_RED, false);
-    graphics_draw_char(close_x + 6, btn_y + 5, 'X', COL_WHITE, h_close ? COL_RED_HOVER : COL_RED);
-    
-    // Maximize
-    int max_x = close_x - 22;
-    bool h_max = rect_contains(max_x, btn_y, 20, 18, mouse.x, mouse.y);
-    draw_bevel_rect(max_x, btn_y, 20, 18, h_max ? COL_BTN_HOVER : 0xFFDDDDDD, false);
-    graphics_draw_char(max_x + 6, btn_y + 5, w->maximized ? '^' : 'O', COL_BLACK, h_max ? COL_BTN_HOVER : 0xFFDDDDDD);
+    int mx = bx-22;
+    bool hm = rect_contains(mx, w->y+5, 20, 18, mouse.x, mouse.y);
+    draw_bevel_rect(mx, w->y+5, 20, 18, hm?COL_BTN_HOVER:0xFFDDDDDD, false);
+    graphics_draw_char(mx+6, w->y+10, w->maximized?'^':'O', COL_BLACK, 0);
 
-    // Minimize
-    int min_x = max_x - 22;
-    bool h_min = rect_contains(min_x, btn_y, 20, 18, mouse.x, mouse.y);
-    draw_bevel_rect(min_x, btn_y, 20, 18, h_min ? COL_BTN_HOVER : 0xFFDDDDDD, false);
-    graphics_draw_char(min_x + 6, btn_y + 5, '_', COL_BLACK, h_min ? COL_BTN_HOVER : 0xFFDDDDDD);
+    int mn = mx-22;
+    bool hmn = rect_contains(mn, w->y+5, 20, 18, mouse.x, mouse.y);
+    draw_bevel_rect(mn, w->y+5, 20, 18, hmn?COL_BTN_HOVER:0xFFDDDDDD, false);
+    graphics_draw_char(mn+6, w->y+10, '_', COL_BLACK, 0);
 
-    // Client Area
-    int cx = w->x + 4;
-    int cy = w->y + WIN_CAPTION_H + 4;
+    int cx = w->x+4, cy = w->y+WIN_CAPTION_H+4;
     if (w->type == APP_NOTEPAD) render_notepad(w, cx, cy);
     else if (w->type == APP_CALC) render_calc(w, cx, cy);
     else if (w->type == APP_FILES) render_file_manager(w, cx, cy);
-    else if (w->type == APP_WELCOME) render_system_info(w, cx, cy);
-}
-
-static void render_cursor(void) {
-    int mx = mouse.x;
-    int my = mouse.y;
-    
-    // Draw 12x19 pointer
-    for(int y=0; y<19; y++) {
-        for(int x=0; x<12; x++) {
-            uint8_t p = CURSOR_BITMAP[y][x];
-            if(p == 1) graphics_put_pixel(mx+x, my+y, COL_BLACK);
-            else if(p == 2) graphics_put_pixel(mx+x, my+y, COL_WHITE);
-        }
-    }
+    else if (w->type == APP_SETTINGS) render_settings(w, cx, cy);
+    else render_system_info(w, cx, cy);
 }
 
 static void render_desktop(void) {
-    draw_gradient_rect(0, 0, screen_w, screen_h - TASKBAR_H, COL_DESKTOP_TOP, COL_DESKTOP_BOT);
+    // Use dynamic background color
+    draw_gradient_rect(0, 0, screen_w, screen_h - TASKBAR_H, desktop_col_top, desktop_col_bot);
     
     struct { int x, y; const char* lbl; } icons[] = {
         {20, 20, "My PC"}, {20, 80, "My Files"}, {20, 140, "Notepad"}, {20, 200, "Calc"}
     };
     for (int i=0; i<4; i++) {
-        bool hover = rect_contains(icons[i].x, icons[i].y, 64, 55, mouse.x, mouse.y);
-        if (hover) graphics_fill_rect(icons[i].x, icons[i].y, 64, 55, 0x40FFFFFF);
-        uint32_t icol = (i == 1) ? 0xFFDDAA00 : 0xFFEEEEEE;
-        graphics_fill_rect(icons[i].x+16, icons[i].y+5, 32, 28, icol);
-        graphics_draw_string_scaled(icons[i].x+6, icons[i].y+41, icons[i].lbl, COL_BLACK, 0, 1);
+        bool h = rect_contains(icons[i].x, icons[i].y, 64, 55, mouse.x, mouse.y);
+        if (h) graphics_fill_rect(icons[i].x, icons[i].y, 64, 55, 0x40FFFFFF);
+        graphics_fill_rect(icons[i].x+16, icons[i].y+5, 32, 28, 0xFFEEEEEE);
         graphics_draw_string_scaled(icons[i].x+5, icons[i].y+40, icons[i].lbl, COL_WHITE, 0, 1);
     }
 
-    for (int i=0; i<MAX_WINDOWS; i++) {
-        if (windows[i]) render_window(windows[i]);
-    }
+    for (int i=0; i<MAX_WINDOWS; i++) if(windows[i]) render_window(windows[i]);
 
     int ty = screen_h - TASKBAR_H;
     draw_gradient_rect(0, ty, screen_w, TASKBAR_H, 0xFF245580, COL_TASKBAR);
-    graphics_fill_rect(0, ty, screen_w, 1, 0xFF507090);
-    
-    bool h_start = rect_contains(0, ty, 80, TASKBAR_H, mouse.x, mouse.y);
-    draw_gradient_rect(0, ty, 80, TASKBAR_H, (h_start||start_menu_open)?COL_START_HOVER:COL_START_BTN, COL_TASKBAR);
-    graphics_fill_rect(10, ty+8, 14, 14, 0xFF00FF00); 
+    bool hs = rect_contains(0, ty, 80, TASKBAR_H, mouse.x, mouse.y);
+    draw_gradient_rect(0, ty, 80, TASKBAR_H, (hs||start_menu_open)?COL_START_HOVER:COL_START_BTN, COL_TASKBAR);
     graphics_draw_string_scaled(30, ty+10, "Start", COL_WHITE, 0, 1);
-    
+
     char time_buf[8]; get_time_string(time_buf);
-    int clock_x = screen_w - 60;
-    draw_bevel_rect(clock_x, ty+4, 56, TASKBAR_H-8, 0xFF153050, true);
-    graphics_draw_string_scaled(clock_x+8, ty+10, time_buf, COL_WHITE, 0xFF153050, 1);
+    draw_bevel_rect(screen_w-60, ty+4, 56, TASKBAR_H-8, 0xFF153050, true);
+    graphics_draw_string_scaled(screen_w-52, ty+10, time_buf, COL_WHITE, 0xFF153050, 1);
 
     int tx = 90;
     for(int i=0; i<MAX_WINDOWS; i++) {
         if(windows[i] && windows[i]->visible) {
-            bool active = windows[i]->focused && !windows[i]->minimized;
-            draw_bevel_rect(tx, ty+4, 100, TASKBAR_H-8, active?0xFF3A6EA5:0xFF2A4E75, !active);
-            char st[11]; int c=0; while(c<10 && windows[i]->title[c]){st[c]=windows[i]->title[c]; c++;} st[c]=0;
-            graphics_draw_string_scaled(tx+5, ty+10, st, COL_WHITE, active?0xFF3A6EA5:0xFF2A4E75, 1);
+            bool a = windows[i]->focused && !windows[i]->minimized;
+            draw_bevel_rect(tx, ty+4, 100, TASKBAR_H-8, a?0xFF3A6EA5:0xFF2A4E75, !a);
+            char s[11]; int c=0; while(c<10&&windows[i]->title[c]){s[c]=windows[i]->title[c];c++;}s[c]=0;
+            graphics_draw_string_scaled(tx+5, ty+10, s, COL_WHITE, 0, 1);
             tx += 105;
         }
     }
 
     if (start_menu_open) {
-        int mw = 160, mh = 240, my = ty - mh;
-        draw_bevel_rect(0, my, mw, mh, COL_WIN_BODY, false);
+        int mh = 280, my = ty - mh;
+        draw_bevel_rect(0, my, 160, mh, COL_WIN_BODY, false);
         graphics_fill_rect(0, my, 24, mh, COL_START_BTN);
-        struct { int y; const char* lbl; } items[] = {{my+10, "My PC"}, {my+40, "File Explorer"}, {my+80, "Notepad"}, {my+110, "Calculator"}, {my+200, "Shutdown"}};
-        for(int i=0; i<5; i++) {
-            if (i==4) graphics_fill_rect(25, items[i].y-10, mw-30, 1, 0xFFAAAAAA);
-            bool h = rect_contains(25, items[i].y, mw-30, 24, mouse.x, mouse.y);
-            if(h) graphics_fill_rect(25, items[i].y, mw-30, 24, COL_BTN_HOVER);
+        struct { int y; const char* lbl; } items[] = {
+            {my+10, "My PC"}, {my+40, "File Explorer"}, {my+80, "Notepad"}, 
+            {my+110, "Calculator"}, {my+150, "Settings"}, {my+240, "Shutdown"}
+        };
+        for(int i=0; i<6; i++) {
+            if(i==5) graphics_fill_rect(25, items[i].y-10, 130, 1, 0xFFAAAAAA);
+            bool h = rect_contains(25, items[i].y, 130, 24, mouse.x, mouse.y);
+            if(h) graphics_fill_rect(25, items[i].y, 130, 24, COL_BTN_HOVER);
             graphics_draw_string_scaled(35, items[i].y+6, items[i].lbl, h?COL_WHITE:COL_BLACK, h?COL_BTN_HOVER:COL_WIN_BODY, 1);
         }
     }
 
-    render_cursor();
-}
-
-static void toggle_maximize(Window* w) {
-    if (w->maximized) {
-        w->x = w->restore_x; w->y = w->restore_y; w->w = w->restore_w; w->h = w->restore_h;
-        w->maximized = false;
-    } else {
-        w->restore_x = w->x; w->restore_y = w->y; w->restore_w = w->w; w->restore_h = w->h;
-        w->x = 0; w->y = 0; w->w = screen_w; w->h = screen_h - TASKBAR_H;
-        w->maximized = true;
+    // Render Mouse Cursor
+    for(int y=0; y<19; y++) for(int x=0; x<12; x++) {
+        if(CURSOR_BITMAP[y][x]==1) graphics_put_pixel(mouse.x+x, mouse.y+y, COL_BLACK);
+        else if(CURSOR_BITMAP[y][x]==2) graphics_put_pixel(mouse.x+x, mouse.y+y, COL_WHITE);
     }
 }
 
-static void handle_calc_logic(Window* w, char c) {
-    CalcState* s = &w->state.calc;
-    if (c >= '0' && c <= '9') {
-        int d = c - '0';
-        if (s->new_entry) {
-            s->current_val = d;
-            s->new_entry = false;
-        } else if (s->current_val < 100000000) {
-            s->current_val = s->current_val * 10 + d;
+static void handle_settings_click(Window* w, int x, int y) {
+    int cx = w->x + 4; 
+    int cy = w->y + WIN_CAPTION_H + 4;
+    
+    // Colors
+    uint32_t colors_top[] = { 0xFF2D73A8, 0xFF2D882D, 0xFF882D2D, 0xFF333333 };
+    uint32_t colors_bot[] = { 0xFF103050, 0xFF103010, 0xFF301010, 0xFF000000 };
+    
+    for (int i = 0; i < 4; i++) {
+        int bx = cx + 10 + (i * 40);
+        int by = cy + 30;
+        if (rect_contains(bx, by, 30, 30, x, y)) {
+            desktop_col_top = colors_top[i];
+            desktop_col_bot = colors_bot[i];
+            return;
         }
-    } else if (c == 'C') {
-        s->current_val = 0;
-        s->accumulator = 0;
-        s->op = 0;
-        s->new_entry = true;
-    } else if (c == '+' || c == '-' || c == '*' || c == '/') {
-        s->accumulator = s->current_val;
-        s->op = c;
-        s->new_entry = true;
-    } else if (c == '=') {
-        if (s->op == '+') {
-            s->current_val = s->accumulator + s->current_val;
-        } else if (s->op == '-') {
-            s->current_val = s->accumulator - s->current_val;
-        } else if (s->op == '*') {
-            s->current_val = s->accumulator * s->current_val;
-        } else if (s->op == '/') {
-            if (s->current_val != 0) {
-                s->current_val = s->accumulator / s->current_val;
-            }
+    }
+
+    // Mouse Speed
+    int sense_map[] = { 1, 2, 4 };
+    for (int i = 0; i < 3; i++) {
+        int bx = cx + 10 + (i * 60);
+        int by = cy + 100;
+        if (rect_contains(bx, by, 50, 24, x, y)) {
+            mouse_set_sensitivity(sense_map[i]);
+            return;
         }
-        s->op = 0;
-        s->new_entry = true;
     }
 }
 
@@ -540,13 +395,14 @@ static void on_click(int x, int y) {
     int ty = screen_h - TASKBAR_H;
 
     if (start_menu_open) {
-        int my = ty - 240;
+        int my = ty - 280;
         if (x < 160 && y > my) {
             if (rect_contains(0, my+10, 160, 24, x, y)) create_window(APP_WELCOME, "My PC", 300, 200);
             else if (rect_contains(0, my+40, 160, 24, x, y)) create_window(APP_FILES, "File Explorer", 400, 300);
             else if (rect_contains(0, my+80, 160, 24, x, y)) create_window(APP_NOTEPAD, "Notepad", 300, 200);
             else if (rect_contains(0, my+110, 160, 24, x, y)) create_window(APP_CALC, "Calculator", 220, 300);
-            else if (rect_contains(0, my+200, 160, 30, x, y)) outw(0x604, 0x2000); 
+            else if (rect_contains(0, my+150, 160, 24, x, y)) create_window(APP_SETTINGS, "Settings", 250, 200);
+            else if (rect_contains(0, my+240, 160, 30, x, y)) outw(0x604, 0x2000);
             start_menu_open = false; return;
         }
         start_menu_open = false;
@@ -555,58 +411,41 @@ static void on_click(int x, int y) {
     if (y >= ty) {
         if (x < 80) { start_menu_open = !start_menu_open; return; }
         int tx = 90;
-        for (int i=0; i<MAX_WINDOWS; i++) {
-            if (windows[i] && windows[i]->visible) {
-                if (rect_contains(tx, ty, 100, TASKBAR_H, x, y)) {
-                    if (windows[i]->focused && !windows[i]->minimized) windows[i]->minimized = true;
-                    else focus_window(i);
-                    return;
-                }
-                tx += 105;
+        for (int i=0; i<MAX_WINDOWS; i++) if(windows[i] && windows[i]->visible) {
+            if (rect_contains(tx, ty, 100, TASKBAR_H, x, y)) {
+                if(windows[i]->focused && !windows[i]->minimized) windows[i]->minimized = true;
+                else focus_window(i);
+                return;
             }
+            tx += 105;
         }
         return;
     }
 
-    // Iterate backwards to find top-most
     for (int i = MAX_WINDOWS - 1; i >= 0; i--) {
-        Window* w = windows[i]; 
+        Window* w = windows[i];
         if (w && w->visible && !w->minimized) {
             if (rect_contains(w->x, w->y, w->w, w->h, x, y)) {
-                // Bubble window to top and get its NEW index
-                int new_idx = focus_window(i);
-                // Pointer w is still valid, but check index for closure
-                if (new_idx == -1) new_idx = i; // Should not happen if logic correct
-                
-                w = windows[new_idx];
-
-                int by = w->y + 5, cx = w->x + w->w - 25;
-                if (rect_contains(cx, by, 20, 18, x, y)) { 
-                    close_window(new_idx); 
-                    return; 
+                int idx = focus_window(i); w = windows[idx];
+                int by = w->y+5, cx = w->x+w->w-25;
+                if (rect_contains(cx, by, 20, 18, x, y)) { close_window(idx); return; }
+                if (rect_contains(cx-22, by, 20, 18, x, y)) {
+                    if(w->maximized) { w->x=w->restore_x; w->y=w->restore_y; w->w=w->restore_w; w->h=w->restore_h; w->maximized=false; }
+                    else { w->restore_x=w->x; w->restore_y=w->y; w->restore_w=w->w; w->restore_h=w->h; w->x=0; w->y=0; w->w=screen_w; w->h=screen_h-TASKBAR_H; w->maximized=true; }
+                    return;
                 }
-                if (rect_contains(cx-22, by, 20, 18, x, y)) { toggle_maximize(w); return; }
                 if (rect_contains(cx-44, by, 20, 18, x, y)) { w->minimized = true; return; }
                 
                 if (y < w->y + WIN_CAPTION_H && !w->maximized) {
                     w->dragging = true; w->drag_off_x = x - w->x; w->drag_off_y = y - w->y; return;
                 }
                 
-                if (w->type == APP_CALC) {
-                    const char* btns = "789/456*123-C0=+";
-                    int sx = w->x + 14, sy = w->y + WIN_CAPTION_H + 54;
-                    for(int b=0; b<16; b++) {
-                        if (rect_contains(sx + (b%4)*40, sy + (b/4)*35, 35, 30, x, y)) {
-                            handle_calc_logic(w, btns[b]);
-                            return;
-                        }
-                    }
-                }
-                
+                if (w->type == APP_CALC) handle_calc_logic(w, 0); // Mouse logic handled in render for now or specific handler
+                if (w->type == APP_SETTINGS) handle_settings_click(w, x, y);
                 if (w->type == APP_FILES) {
                     int ly = w->y + WIN_CAPTION_H + 28; size_t cnt = fs_file_count();
                     for(size_t f=0; f<cnt; f++) {
-                        if (rect_contains(w->x+4, ly + (f*18), w->w-8, 18, x, y)) { w->state.files.selected_index = f; return; }
+                        if(rect_contains(w->x+4, ly+(f*18), w->w-8, 18, x, y)) { w->state.files.selected_index=f; return; }
                     }
                 }
                 return;
@@ -620,26 +459,50 @@ static void on_click(int x, int y) {
     else if (rect_contains(20, 200, 64, 55, x, y)) create_window(APP_CALC, "Calc", 220, 300);
 }
 
+static void handle_calc_logic(Window* w, char key) {
+    // Logic merged with keyboard input in next step, purely pointer based click handled in render_calc
+    if (key == 0) { // Mouse Click Logic
+        int cx = w->x + 14; int cy = w->y + WIN_CAPTION_H + 54;
+        const char* btns = "789/456*123-C0=+";
+        for(int b=0; b<16; b++) {
+            if (rect_contains(cx+(b%4)*40, cy+(b/4)*35, 35, 30, mouse.x, mouse.y)) {
+                char c = btns[b];
+                CalcState* s = &w->state.calc;
+                if (c >= '0' && c <= '9') {
+                    int d = c - '0';
+                    if (s->new_entry) { s->current_val = d; s->new_entry = false; }
+                    else if (s->current_val < 100000000) s->current_val = s->current_val * 10 + d;
+                } else if (c == 'C') {
+                    s->current_val = 0; s->accumulator = 0; s->op = 0; s->new_entry = true;
+                } else if (c == '+' || c == '-' || c == '*' || c == '/') {
+                    s->accumulator = s->current_val; s->op = c; s->new_entry = true;
+                } else if (c == '=') {
+                    if (s->op == '+') s->current_val = s->accumulator + s->current_val;
+                    else if (s->op == '-') s->current_val = s->accumulator - s->current_val;
+                    else if (s->op == '*') s->current_val = s->accumulator * s->current_val;
+                    else if (s->op == '/') { if(s->current_val!=0) s->current_val = s->accumulator / s->current_val; }
+                    s->op = 0; s->new_entry = true;
+                }
+            }
+        }
+    }
+}
+
 void gui_demo_run(void) {
     syslog_write("GUI: Starting desktop environment...");
     __asm__ volatile("sti");
-
     graphics_enable_double_buffer();
-    screen_w = graphics_get_width();
-    screen_h = graphics_get_height();
+    screen_w = graphics_get_width(); screen_h = graphics_get_height();
     mouse_init();
-
     for(int i=0; i<MAX_WINDOWS; i++) windows[i] = NULL;
-    start_menu_open = false;
     create_window(APP_WELCOME, "Welcome", 300, 160);
 
     bool running = true;
     while(running) {
-        timer_wait(1); 
-
+        timer_wait(1);
         char c = keyboard_poll_char();
-        if (c == 27) running = false; 
-
+        if (c == 27) running = false;
+        
         Window* top = get_top_window();
         if (c && top && top->visible && !top->minimized && top->type == APP_NOTEPAD) {
             NotepadState* ns = &top->state.notepad;
@@ -647,24 +510,17 @@ void gui_demo_run(void) {
             else if (c >= 32 && c <= 126 && ns->length < 250) { ns->buffer[ns->length++] = c; ns->buffer[ns->length] = 0; }
         }
 
-        prev_mouse = mouse;
-        mouse = mouse_get_state();
-        
+        prev_mouse = mouse; mouse = mouse_get_state();
         if (mouse.left_button && top && top->visible && top->dragging) {
-            top->x = mouse.x - top->drag_off_x;
-            top->y = mouse.y - top->drag_off_y;
+            top->x = mouse.x - top->drag_off_x; top->y = mouse.y - top->drag_off_y;
         }
-        
         if (mouse.left_button && !prev_mouse.left_button) on_click(mouse.x, mouse.y);
-        
         if (!mouse.left_button && prev_mouse.left_button) {
             for(int i=0; i<MAX_WINDOWS; i++) if(windows[i]) windows[i]->dragging = false;
         }
-
         render_desktop();
         graphics_swap_buffer();
     }
-
     for(int i=0; i<MAX_WINDOWS; i++) if(windows[i]) kfree(windows[i]);
     graphics_fill_rect(0, 0, screen_w, screen_h, COL_BLACK);
 }
