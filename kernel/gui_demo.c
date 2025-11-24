@@ -24,6 +24,15 @@ void gui_set_running(bool running) {
 
 // --- RING 3 SYSCALL WRAPPERS ---
 
+static void syscall_yield(void) {
+    __asm__ volatile("int $0x80" : : "D"((uint64_t)0) : "memory");
+}
+
+static void syscall_exit(void) {
+    __asm__ volatile("int $0x80" : : "D"((uint64_t)1) : "memory");
+    while(1) __asm__ volatile("pause");
+}
+
 static void syscall_log(const char* msg) {
     __asm__ volatile("int $0x80" : : "D"((uint64_t)2), "S"(msg) : "memory");
 }
@@ -34,11 +43,6 @@ static void syscall_shutdown(void) {
 
 static void syscall_get_mouse(MouseState* out) {
     __asm__ volatile("int $0x80" : : "D"((uint64_t)5), "S"(out) : "memory");
-}
-
-static void syscall_exit(void) {
-    __asm__ volatile("int $0x80" : : "D"((uint64_t)1) : "memory");
-    while(1) __asm__ volatile("pause");
 }
 
 // --- Configuration ---
@@ -160,8 +164,7 @@ static void get_time_string(char* buf) {
     str_copy(buf, "12:00");
 }
 
-// --- Forward Declarations for Renderers ---
-static void draw_bevel_rect(int x, int y, int w, int h, uint32_t fill, bool sunk);
+// --- Forward Declarations ---
 static void render_notepad(Window* w, int cx, int cy);
 static void render_calc(Window* w, int cx, int cy);
 static void render_file_manager(Window* w, int cx, int cy);
@@ -298,7 +301,6 @@ static void handle_terminal_input(Window* w, char c) {
     TerminalState* ts = &w->state.term;
     if (c == '\n') {
         for (int i=0; i<5; i++) str_copy(ts->history[i], ts->history[i+1]);
-        
         char line[80];
         str_copy(line, ts->prompt);
         int p_len = kstrlen_local(line);
@@ -329,18 +331,15 @@ static void handle_terminal_input(Window* w, char c) {
 
 static void handle_calc_logic(Window* w, char key) {
     if (key != 0) return;
-    
     int cx = w->x + 14; 
     int cy = w->y + WIN_CAPTION_H + 54;
     const char* btns = "789/456*123-C0=+";
-    
     for(int b=0; b<16; b++) {
         int bx = cx+(b%4)*40;
         int by = cy+(b/4)*35;
         if (rect_contains(bx, by, 35, 30, mouse.x, mouse.y)) {
             char c = btns[b];
             CalcState* s = &w->state.calc;
-            
             if (c >= '0' && c <= '9') {
                 int d = c - '0';
                 if (s->new_entry) { s->current_val = d; s->new_entry = false; }
@@ -381,11 +380,9 @@ static void draw_gradient_rect(int x, int y, int w, int h, uint32_t c1, uint32_t
     for (int i=0; i<h; i++) {
         uint8_t r1 = (c1 >> 16) & 0xFF, g1 = (c1 >> 8) & 0xFF, b1 = c1 & 0xFF;
         uint8_t r2 = (c2 >> 16) & 0xFF, g2 = (c2 >> 8) & 0xFF, b2 = c2 & 0xFF;
-        
         uint8_t r = r1 + ((int)(r2 - r1) * i) / h;
         uint8_t g = g1 + ((int)(g2 - g1) * i) / h;
         uint8_t b = b1 + ((int)(b2 - b1) * i) / h;
-        
         uint32_t col = 0xFF000000 | (r << 16) | (g << 8) | b;
         graphics_fill_rect(x, y+i, w, 1, col);
     }
@@ -546,7 +543,6 @@ static void render_desktop(void) {
     for (int i=0; i<4; i++) {
         bool h = rect_contains(icons[i].x, icons[i].y, 64, 55, mouse.x, mouse.y);
         if (h) graphics_fill_rect(icons[i].x, icons[i].y, 64, 55, 0x40FFFFFF);
-        
         uint32_t icol = (i==0) ? 0xFF000000 : ((i==1) ? 0xFFDDAA00 : 0xFFEEEEEE);
         graphics_fill_rect(icons[i].x+16, icons[i].y+5, 32, 28, icol);
         if (i==0) graphics_draw_string_scaled(icons[i].x+18, icons[i].y+8, ">_", COL_GREEN, COL_BLACK, 1);
@@ -669,16 +665,21 @@ void gui_demo_run(void) {
     for(int i=0; i<MAX_WINDOWS; i++) windows[i] = NULL;
     create_window(APP_WELCOME, "Welcome", 300, 160);
 
-    // Force initial render before waiting to ensure user sees the GUI
+    // Force initial render (Crucial for first frame)
+    graphics_fill_rect(0, 0, screen_w, screen_h, COL_RED); // Debug flash
     render_desktop();
     graphics_swap_buffer();
 
     bool running = true;
     while(running) {
-        Window* top = get_top_window();
+        // Yield to OS via syscall instead of just pausing
+        // This allows scheduler to preempt us cleanly
+        syscall_yield(); 
+        
         char c = keyboard_poll_char();
         if (c == 27) running = false;
         
+        Window* top = get_top_window();
         if (c && top && top->visible && !top->minimized && top->focused) {
             if (top->type == APP_NOTEPAD) {
                 NotepadState* ns = &top->state.notepad;
@@ -712,9 +713,6 @@ void gui_demo_run(void) {
         
         render_desktop();
         graphics_swap_buffer();
-        
-        // Wait AFTER rendering
-        timer_wait(1); 
     }
     
     for(int i=0; i<MAX_WINDOWS; i++) if(windows[i]) kfree(windows[i]);
