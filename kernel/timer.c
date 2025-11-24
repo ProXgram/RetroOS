@@ -42,8 +42,9 @@ void timer_handler(void) {
 void timer_wait(int ticks) {
     uint64_t end = g_ticks + ticks;
     while (g_ticks < end) {
-        // Halt to allow scheduler to run other tasks while this one waits
-        __asm__ volatile("hlt");
+        // 'hlt' causes a GPF in Ring 3. We use 'pause' instead for busy-waiting compatibility.
+        // Ideally, we would yield() here, but we rely on the preemptive tick to switch tasks.
+        __asm__ volatile("pause");
     }
 }
 
