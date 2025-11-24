@@ -9,6 +9,7 @@
 #include "kstdio.h"
 #include "fs.h"
 #include "system.h"
+#include "heap.h"  // Include heap for kmalloc/kfree
 #include <stdbool.h>
 
 // --- Configuration ---
@@ -80,7 +81,9 @@ typedef struct {
 } Window;
 
 // --- State ---
-static Window windows[MAX_WINDOWS];
+// Changed from static array to pointer for kmalloc usage
+static Window* windows = NULL; 
+
 static bool start_menu_open = false;
 static int screen_w, screen_h;
 static MouseState mouse;
@@ -97,7 +100,9 @@ static uint8_t get_rtc_register(int reg) {
 
 static void get_time_string(char* buf) {
     // Wait for RTC update to complete (bit 7 of reg A)
-    while (get_rtc_register(0x0A) & 0x80);
+    // Add timeout to prevent hanging if RTC is busted
+    int timeout = 1000;
+    while ((get_rtc_register(0x0A) & 0x80) && timeout-- > 0);
     
     uint8_t min = get_rtc_register(0x02);
     uint8_t hour = get_rtc_register(0x04);
@@ -140,7 +145,7 @@ static void int_to_str(int v, char* buf) {
 
 // Moves window at 'index' to the end of the array (top of Z-order)
 static void focus_window(int index) {
-    if (index < 0 || index >= MAX_WINDOWS) return;
+    if (!windows || index < 0 || index >= MAX_WINDOWS) return;
     
     if (index == MAX_WINDOWS - 1) {
         for(int i=0; i<MAX_WINDOWS-1; i++) windows[i].focused = false;
@@ -161,6 +166,8 @@ static void focus_window(int index) {
 }
 
 static Window* create_window(AppType type, const char* title, int w, int h) {
+    if (!windows) return NULL;
+
     int slot = -1;
     for (int i = 0; i < MAX_WINDOWS; i++) {
         if (!windows[i].visible) { slot = i; break; }
@@ -204,8 +211,10 @@ static Window* create_window(AppType type, const char* title, int w, int h) {
 // --- Drawing ---
 
 static void draw_gradient_rect(int x, int y, int w, int h, uint32_t c1, uint32_t c2) {
+    // Simple linear interpolation
+    // Optimization: Calculate steps in fixed point to avoid float
+    // Not heavily optimized, but good enough for demo
     for (int i=0; i<h; i++) {
-        // Simple linear interpolation
         uint8_t r1 = (c1 >> 16) & 0xFF;
         uint8_t g1 = (c1 >> 8) & 0xFF;
         uint8_t b1 = c1 & 0xFF;
@@ -390,6 +399,8 @@ static void render_window(Window* w) {
 }
 
 static void render_desktop(void) {
+    if (!windows) return;
+
     // 1. Wallpaper Gradient
     draw_gradient_rect(0, 0, screen_w, screen_h - TASKBAR_H, COL_DESKTOP_TOP, COL_DESKTOP_BOT);
     
@@ -635,7 +646,20 @@ void gui_demo_run(void) {
     screen_h = graphics_get_height();
     mouse_init();
 
-    for(int i=0; i<MAX_WINDOWS; i++) windows[i].visible = false;
+    // IMPLEMENTED KMALLOC AS REQUESTED
+    windows = (Window*)kmalloc(sizeof(Window) * MAX_WINDOWS);
+    if (!windows) {
+        syslog_write("GUI: Critical Failure - kmalloc returned NULL for window manager");
+        kprintf("GUI Error: Out of memory.\n");
+        return;
+    }
+    
+    // Sanitize memory
+    for(int i=0; i<MAX_WINDOWS; i++) {
+        windows[i].visible = false;
+        windows[i].id = i;
+    }
+
     start_menu_open = false;
     create_window(APP_WELCOME, "Welcome", 300, 160);
 
@@ -669,8 +693,15 @@ void gui_demo_run(void) {
 
         render_desktop();
         graphics_swap_buffer();
+        
+        // Prevent CPU starvation which can freeze interrupts
+        timer_wait(1);
     }
+    
     graphics_fill_rect(0, 0, screen_w, screen_h, COL_BLACK);
+    
+    if (windows) {
+        kfree(windows);
+        windows = NULL;
+    }
 }
-
-//te
