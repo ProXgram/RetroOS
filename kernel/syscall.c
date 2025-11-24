@@ -6,10 +6,11 @@
 #include "io.h"
 #include "mouse.h"
 
-// Definition of the register state pushed by isr_syscall
+// Definition of the register state pushed by isr_syscall in entry.asm
 struct syscall_regs {
     uint64_t rbx, rcx, rdx, rsi, rdi, r8, r9, r10, r11, r12, r13, r14, r15, rbp;
-    uint64_t rip, cs, rflags, rsp, ss; // Pushed by CPU on interrupt
+    // Pushed by CPU on interrupt + error code/rip
+    uint64_t rip, cs, rflags, rsp, ss; 
 };
 
 // --- Syscall Implementations ---
@@ -20,21 +21,14 @@ static void sys_yield(void) {
 
 static void sys_exit(void) {
     kprintf("Process requested exit.\n");
-    while(1) { schedule(); } // Simple hang/yield loop for now
+    // In a real OS, we would mark task as dead. 
+    // Here we just yield forever until the shell kills us or we reboot.
+    while(1) { schedule(); } 
 }
 
 static void sys_log(const char* msg) {
-    // Security TODO: Validate 'msg' pointer is in user range!
+    // Security TODO: In a real OS, validate 'msg' pointer is in user range!
     syslog_write(msg);
-}
-
-// Example of a driver interaction via syscall
-static int sys_disk_read(uint32_t lba, uint8_t count, uint8_t* buffer) {
-    // Security TODO: Validate 'buffer' pointer!
-    if (ata_read(lba, count, buffer)) {
-        return 0; // Success
-    }
-    return -1; // Error
 }
 
 static void sys_shutdown(void) {
@@ -45,7 +39,7 @@ static void sys_shutdown(void) {
 }
 
 static void sys_get_mouse(MouseState* user_struct) {
-    // In a real OS, validate pointer first!
+    // Security TODO: Validate pointer!
     if (user_struct) {
         MouseState k_state = mouse_get_state();
         *user_struct = k_state;
@@ -55,7 +49,7 @@ static void sys_get_mouse(MouseState* user_struct) {
 // --- Dispatcher ---
 
 void syscall_dispatcher(struct syscall_regs* regs) {
-    // Syscall number passed in RDI (Argument 1)
+    // Syscall number passed in RDI (Argument 1 in System V ABI)
     uint64_t syscall_num = regs->rdi; 
 
     switch (syscall_num) {
@@ -68,8 +62,7 @@ void syscall_dispatcher(struct syscall_regs* regs) {
         case 2: // Log
             sys_log((const char*)regs->rsi);
             break;
-        case 3: // Disk Read
-            sys_disk_read((uint32_t)regs->rsi, (uint8_t)regs->rdx, (uint8_t*)regs->rcx);
+        case 3: // Reserved (Disk)
             break;
         case 4: // Shutdown
             sys_shutdown();
