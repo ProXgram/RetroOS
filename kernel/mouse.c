@@ -8,8 +8,10 @@
 #define MOUSE_PORT_STATUS  0x64
 #define MOUSE_PORT_CMD     0x64
 
-// Default sensitivity
-static int g_mouse_sensitivity = 1;
+// Sensitivity: 1.0 provides the most accurate 1:1 tracking for PS/2
+// Higher values cause the guest cursor to move faster than the host cursor,
+// leading to immediate desynchronization.
+#define MOUSE_SENSITIVITY  1
 
 static uint8_t g_mouse_cycle = 0;
 static int8_t  g_mouse_byte[3];
@@ -43,16 +45,6 @@ static uint8_t mouse_read(void) {
     return inb(MOUSE_PORT_DATA);
 }
 
-void mouse_set_sensitivity(int sense) {
-    if (sense < 1) sense = 1;
-    if (sense > 10) sense = 10;
-    g_mouse_sensitivity = sense;
-}
-
-int mouse_get_sensitivity(void) {
-    return g_mouse_sensitivity;
-}
-
 void mouse_init(void) {
     uint8_t status;
 
@@ -79,6 +71,7 @@ void mouse_init(void) {
     mouse_read(); // Acknowledge
 
     // Center Mouse
+    // We start in the center because QEMU usually centers the cursor when capturing.
     g_mouse_x = graphics_get_width() / 2;
     g_mouse_y = graphics_get_height() / 2;
 
@@ -90,8 +83,10 @@ void mouse_init(void) {
 
 void mouse_handle_interrupt(void) {
     uint8_t status = inb(MOUSE_PORT_STATUS);
+    // Check if the interrupt is actually from the mouse (Auxiliary Device)
+    // Bit 5 (0x20) of status register is 1 if data comes from mouse
     if (!(status & 0x20)) {
-        if (status & 0x01) inb(MOUSE_PORT_DATA);
+        if (status & 0x01) inb(MOUSE_PORT_DATA); // Flush garbage
         return; 
     }
 
@@ -99,6 +94,8 @@ void mouse_handle_interrupt(void) {
 
     switch(g_mouse_cycle) {
         case 0:
+            // Byte 0: Y overflow, X overflow, Y sign, X sign, 1, Middle, Right, Left
+            // Bit 3 must be 1.
             if ((b & 0x08) == 0x08) { 
                 g_mouse_byte[0] = b;
                 g_mouse_cycle++;
@@ -112,29 +109,30 @@ void mouse_handle_interrupt(void) {
             g_mouse_byte[2] = b;
             g_mouse_cycle = 0;
 
-            // Apply variable sensitivity
-            int dx = (int8_t)g_mouse_byte[1] * g_mouse_sensitivity;
-            int dy = (int8_t)g_mouse_byte[2] * g_mouse_sensitivity;
+            // Packet ready
+            // Use standard 1:1 sensitivity to minimize drift against host cursor
+            int dx = (int8_t)g_mouse_byte[1] * MOUSE_SENSITIVITY;
+            int dy = (int8_t)g_mouse_byte[2] * MOUSE_SENSITIVITY;
             
-            bool x_ovf = (g_mouse_byte[0] & 0x40) != 0;
-            bool y_ovf = (g_mouse_byte[0] & 0x80) != 0;
+            // We ignore overflow bits. Discarding packets on overflow causes
+            // the mouse to 'stuck' during fast movement, which feels like lag/desync.
+            // It's better to process the clipped movement than no movement.
 
-            // Skip update on overflow to prevent erratic jumps
-            if (!x_ovf && !y_ovf) {
-                g_mouse_x += dx;
-                g_mouse_y -= dy; 
+            // Standard PS/2 mouse Y is inverted relative to screen
+            g_mouse_x += dx;
+            g_mouse_y -= dy; 
 
-                int w = graphics_get_width();
-                int h = graphics_get_height();
-                
-                if (g_mouse_x < 0) g_mouse_x = 0;
-                if (g_mouse_x >= w) g_mouse_x = w - 1;
-                if (g_mouse_y < 0) g_mouse_y = 0;
-                if (g_mouse_y >= h) g_mouse_y = h - 1;
+            // Clamp to screen dimensions
+            int w = graphics_get_width();
+            int h = graphics_get_height();
+            
+            if (g_mouse_x < 0) g_mouse_x = 0;
+            if (g_mouse_x >= w) g_mouse_x = w - 1;
+            if (g_mouse_y < 0) g_mouse_y = 0;
+            if (g_mouse_y >= h) g_mouse_y = h - 1;
 
-                g_left_btn = (g_mouse_byte[0] & 0x01) != 0;
-                g_right_btn = (g_mouse_byte[0] & 0x02) != 0;
-            }
+            g_left_btn = (g_mouse_byte[0] & 0x01) != 0;
+            g_right_btn = (g_mouse_byte[0] & 0x02) != 0;
             break;
     }
 }
@@ -147,5 +145,3 @@ MouseState mouse_get_state(void) {
     s.right_button = g_right_btn;
     return s;
 }
-
-// test
