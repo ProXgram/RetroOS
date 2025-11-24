@@ -15,4 +15,8 @@ void mouse_init(void);
 void mouse_handle_interrupt(void);
 MouseState mouse_get_state(void);
 
+// New Sensitivity Controls
+void mouse_set_sensitivity(int sense);
+int mouse_get_sensitivity(void);
+
 #endif
