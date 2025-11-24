@@ -82,13 +82,37 @@ typedef struct {
 
 // --- State ---
 // Array of pointers to windows.
-// Windows are allocated on the heap via kmalloc.
 static Window* windows[MAX_WINDOWS];
 
 static bool start_menu_open = false;
 static int screen_w, screen_h;
 static MouseState mouse;
 static MouseState prev_mouse;
+
+// --- Cursor Bitmap ---
+// 12x19 Arrow Cursor
+// 0 = Transparent, 1 = Black Border, 2 = White Fill
+static const uint8_t CURSOR_BITMAP[19][12] = {
+    {1,1,0,0,0,0,0,0,0,0,0,0},
+    {1,2,1,0,0,0,0,0,0,0,0,0},
+    {1,2,2,1,0,0,0,0,0,0,0,0},
+    {1,2,2,2,1,0,0,0,0,0,0,0},
+    {1,2,2,2,2,1,0,0,0,0,0,0},
+    {1,2,2,2,2,2,1,0,0,0,0,0},
+    {1,2,2,2,2,2,2,1,0,0,0,0},
+    {1,2,2,2,2,2,2,2,1,0,0,0},
+    {1,2,2,2,2,2,2,2,2,1,0,0},
+    {1,2,2,2,2,2,2,2,2,2,1,0},
+    {1,2,2,2,2,2,1,1,1,1,1,1},
+    {1,2,2,2,2,2,1,0,0,0,0,0},
+    {1,2,1,1,2,2,1,0,0,0,0,0},
+    {1,1,0,1,2,2,1,0,0,0,0,0},
+    {0,0,0,0,1,2,2,1,0,0,0,0},
+    {0,0,0,0,1,2,2,1,0,0,0,0},
+    {0,0,0,0,0,1,2,2,1,0,0,0},
+    {0,0,0,0,0,1,2,2,1,0,0,0},
+    {0,0,0,0,0,0,1,1,0,0,0,0}
+};
 
 // --- RTC Helper ---
 #define CMOS_ADDRESS 0x70
@@ -100,18 +124,15 @@ static uint8_t get_rtc_register(int reg) {
 }
 
 static void get_time_string(char* buf) {
-    // Simple timeout to prevent hanging if RTC is busy
     int timeout = 1000;
     while ((get_rtc_register(0x0A) & 0x80) && timeout-- > 0);
     
     uint8_t min = get_rtc_register(0x02);
     uint8_t hour = get_rtc_register(0x04);
     
-    // Convert BCD to binary
     min = (min & 0x0F) + ((min / 16) * 10);
     hour = ((hour & 0x0F) + ((hour / 16) * 10));
     
-    // Simple formatting
     buf[0] = '0' + (hour / 10);
     buf[1] = '0' + (hour % 10);
     buf[2] = ':';
@@ -145,7 +166,6 @@ static void int_to_str(int v, char* buf) {
 
 // --- Window Management (Pointer based) ---
 
-// Helper to find the window at the top of the visual stack
 static Window* get_top_window(void) {
     for (int i = MAX_WINDOWS - 1; i >= 0; i--) {
         if (windows[i] != NULL) return windows[i];
@@ -153,22 +173,20 @@ static Window* get_top_window(void) {
     return NULL;
 }
 
-// Brings the window at 'index' to the front (end of occupied list)
-static void focus_window(int index) {
-    if (index < 0 || index >= MAX_WINDOWS) return;
-    if (windows[index] == NULL) return;
+// Returns the new index of the focused window
+static int focus_window(int index) {
+    if (index < 0 || index >= MAX_WINDOWS) return -1;
+    if (windows[index] == NULL) return -1;
 
     Window* target = windows[index];
     
-    // Shift everything after 'index' down by one slot
-    // until we hit the end or a NULL
+    // Bubble up the window to the highest non-null slot
     int i = index;
     while (i < MAX_WINDOWS - 1 && windows[i+1] != NULL) {
         windows[i] = windows[i+1];
         i++;
     }
     
-    // Place target at the top
     windows[i] = target;
 
     // Update focus flags
@@ -178,9 +196,9 @@ static void focus_window(int index) {
             if (windows[j]->focused) windows[j]->minimized = false;
         }
     }
+    return i;
 }
 
-// Removes window and frees memory
 static void close_window(int index) {
     if (index < 0 || index >= MAX_WINDOWS || windows[index] == NULL) return;
     
@@ -195,7 +213,6 @@ static void close_window(int index) {
 }
 
 static void create_window(AppType type, const char* title, int w, int h) {
-    // 1. Find first empty slot
     int slot = -1;
     for (int i = 0; i < MAX_WINDOWS; i++) {
         if (windows[i] == NULL) {
@@ -204,20 +221,18 @@ static void create_window(AppType type, const char* title, int w, int h) {
         }
     }
 
-    // 2. If full, close the bottom-most window (index 0)
+    // If full, close the bottom-most window (index 0)
     if (slot == -1) {
         close_window(0);
         slot = MAX_WINDOWS - 1; // The last slot is now free after shifting
     }
 
-    // 3. Allocate new window
     Window* win = (Window*)kmalloc(sizeof(Window));
     if (!win) {
         syslog_write("GUI: Memory allocation failed for new window");
         return;
     }
 
-    // 4. Initialize
     win->id = slot;
     win->type = type;
     str_copy(win->title, title);
@@ -228,7 +243,6 @@ static void create_window(AppType type, const char* title, int w, int h) {
     win->y = 40 + cascade;
     cascade = (cascade + 20) % 160;
 
-    // Clamp to screen
     if (win->x + w > screen_w) win->x = 20;
     if (win->y + h > screen_h - TASKBAR_H) win->y = 20;
 
@@ -238,7 +252,6 @@ static void create_window(AppType type, const char* title, int w, int h) {
     win->dragging = false;
     win->focused = true;
 
-    // App-specific init
     if (type == APP_NOTEPAD) {
         win->state.notepad.length = 0;
         win->state.notepad.buffer[0] = 0;
@@ -250,7 +263,6 @@ static void create_window(AppType type, const char* title, int w, int h) {
         win->state.files.scroll_offset = 0;
     }
 
-    // 5. Assign to array and focus
     windows[slot] = win;
     focus_window(slot);
 }
@@ -262,7 +274,6 @@ static void draw_gradient_rect(int x, int y, int w, int h, uint32_t c1, uint32_t
         uint8_t r1 = (c1 >> 16) & 0xFF, g1 = (c1 >> 8) & 0xFF, b1 = c1 & 0xFF;
         uint8_t r2 = (c2 >> 16) & 0xFF, g2 = (c2 >> 8) & 0xFF, b2 = c2 & 0xFF;
         
-        // Fixed point math roughly
         uint8_t r = r1 + ((int)(r2 - r1) * i) / h;
         uint8_t g = g1 + ((int)(g2 - g1) * i) / h;
         uint8_t b = b1 + ((int)(b2 - b1) * i) / h;
@@ -285,7 +296,6 @@ static void draw_bevel_rect(int x, int y, int w, int h, uint32_t fill, bool sunk
 static void render_notepad(Window* w, int cx, int cy) {
     draw_bevel_rect(cx+2, cy+2, w->w-4, w->h-WIN_CAPTION_H-4, COL_WHITE, true);
     graphics_draw_string_scaled(cx+6, cy+6, w->state.notepad.buffer, COL_BLACK, COL_WHITE, 1);
-    // Blinking cursor
     if ((timer_get_ticks() / 15) % 2) {
         int cur_x = cx + 6 + (w->state.notepad.length * 8);
         graphics_fill_rect(cur_x, cy+6, 2, 10, COL_BLACK);
@@ -405,10 +415,23 @@ static void render_window(Window* w) {
     else if (w->type == APP_WELCOME) render_system_info(w, cx, cy);
 }
 
+static void render_cursor(void) {
+    int mx = mouse.x;
+    int my = mouse.y;
+    
+    // Draw 12x19 pointer
+    for(int y=0; y<19; y++) {
+        for(int x=0; x<12; x++) {
+            uint8_t p = CURSOR_BITMAP[y][x];
+            if(p == 1) graphics_put_pixel(mx+x, my+y, COL_BLACK);
+            else if(p == 2) graphics_put_pixel(mx+x, my+y, COL_WHITE);
+        }
+    }
+}
+
 static void render_desktop(void) {
     draw_gradient_rect(0, 0, screen_w, screen_h - TASKBAR_H, COL_DESKTOP_TOP, COL_DESKTOP_BOT);
     
-    // Icons
     struct { int x, y; const char* lbl; } icons[] = {
         {20, 20, "My PC"}, {20, 80, "My Files"}, {20, 140, "Notepad"}, {20, 200, "Calc"}
     };
@@ -421,12 +444,10 @@ static void render_desktop(void) {
         graphics_draw_string_scaled(icons[i].x+5, icons[i].y+40, icons[i].lbl, COL_WHITE, 0, 1);
     }
 
-    // Windows (Bottom to Top)
     for (int i=0; i<MAX_WINDOWS; i++) {
         if (windows[i]) render_window(windows[i]);
     }
 
-    // Taskbar
     int ty = screen_h - TASKBAR_H;
     draw_gradient_rect(0, ty, screen_w, TASKBAR_H, 0xFF245580, COL_TASKBAR);
     graphics_fill_rect(0, ty, screen_w, 1, 0xFF507090);
@@ -436,13 +457,11 @@ static void render_desktop(void) {
     graphics_fill_rect(10, ty+8, 14, 14, 0xFF00FF00); 
     graphics_draw_string_scaled(30, ty+10, "Start", COL_WHITE, 0, 1);
     
-    // Clock
     char time_buf[8]; get_time_string(time_buf);
     int clock_x = screen_w - 60;
     draw_bevel_rect(clock_x, ty+4, 56, TASKBAR_H-8, 0xFF153050, true);
     graphics_draw_string_scaled(clock_x+8, ty+10, time_buf, COL_WHITE, 0xFF153050, 1);
 
-    // Tabs
     int tx = 90;
     for(int i=0; i<MAX_WINDOWS; i++) {
         if(windows[i] && windows[i]->visible) {
@@ -454,7 +473,6 @@ static void render_desktop(void) {
         }
     }
 
-    // Start Menu
     if (start_menu_open) {
         int mw = 160, mh = 240, my = ty - mh;
         draw_bevel_rect(0, my, mw, mh, COL_WIN_BODY, false);
@@ -468,12 +486,7 @@ static void render_desktop(void) {
         }
     }
 
-    // Mouse
-    int mx = mouse.x, my = mouse.y;
-    graphics_fill_rect(mx, my, 1, 14, COL_WHITE);
-    graphics_fill_rect(mx, my, 10, 1, COL_WHITE);
-    graphics_fill_rect(mx+1, my+1, 1, 12, COL_BLACK);
-    graphics_fill_rect(mx+1, my+1, 8, 1, COL_BLACK);
+    render_cursor();
 }
 
 static void toggle_maximize(Window* w) {
@@ -487,7 +500,6 @@ static void toggle_maximize(Window* w) {
     }
 }
 
-// Helper to process calculator logic safely to avoid warnings
 static void handle_calc_logic(Window* w, char c) {
     CalcState* s = &w->state.calc;
     if (c >= '0' && c <= '9') {
@@ -527,7 +539,6 @@ static void handle_calc_logic(Window* w, char c) {
 static void on_click(int x, int y) {
     int ty = screen_h - TASKBAR_H;
 
-    // Start Menu Click
     if (start_menu_open) {
         int my = ty - 240;
         if (x < 160 && y > my) {
@@ -541,7 +552,6 @@ static void on_click(int x, int y) {
         start_menu_open = false;
     }
 
-    // Taskbar Click
     if (y >= ty) {
         if (x < 80) { start_menu_open = !start_menu_open; return; }
         int tx = 90;
@@ -558,28 +568,30 @@ static void on_click(int x, int y) {
         return;
     }
 
-    // Window Click
-    // Iterate backwards to find top-most first
+    // Iterate backwards to find top-most
     for (int i = MAX_WINDOWS - 1; i >= 0; i--) {
-        // Capture pointer FIRST because focus_window changes the array index
         Window* w = windows[i]; 
         if (w && w->visible && !w->minimized) {
             if (rect_contains(w->x, w->y, w->w, w->h, x, y)) {
-                focus_window(i);
-                // w is still valid even after moving in the array
+                // Bubble window to top and get its NEW index
+                int new_idx = focus_window(i);
+                // Pointer w is still valid, but check index for closure
+                if (new_idx == -1) new_idx = i; // Should not happen if logic correct
+                
+                w = windows[new_idx];
 
-                // Buttons
                 int by = w->y + 5, cx = w->x + w->w - 25;
-                if (rect_contains(cx, by, 20, 18, x, y)) { close_window(MAX_WINDOWS-1); return; } // After focus, it IS at top
+                if (rect_contains(cx, by, 20, 18, x, y)) { 
+                    close_window(new_idx); 
+                    return; 
+                }
                 if (rect_contains(cx-22, by, 20, 18, x, y)) { toggle_maximize(w); return; }
                 if (rect_contains(cx-44, by, 20, 18, x, y)) { w->minimized = true; return; }
                 
-                // Title Drag
                 if (y < w->y + WIN_CAPTION_H && !w->maximized) {
                     w->dragging = true; w->drag_off_x = x - w->x; w->drag_off_y = y - w->y; return;
                 }
                 
-                // Calculator
                 if (w->type == APP_CALC) {
                     const char* btns = "789/456*123-C0=+";
                     int sx = w->x + 14, sy = w->y + WIN_CAPTION_H + 54;
@@ -591,7 +603,6 @@ static void on_click(int x, int y) {
                     }
                 }
                 
-                // File Manager
                 if (w->type == APP_FILES) {
                     int ly = w->y + WIN_CAPTION_H + 28; size_t cnt = fs_file_count();
                     for(size_t f=0; f<cnt; f++) {
@@ -603,7 +614,6 @@ static void on_click(int x, int y) {
         }
     }
 
-    // Desktop Icons
     if (rect_contains(20, 20, 64, 55, x, y)) create_window(APP_WELCOME, "My PC", 300, 200);
     else if (rect_contains(20, 80, 64, 55, x, y)) create_window(APP_FILES, "File Explorer", 400, 300);
     else if (rect_contains(20, 140, 64, 55, x, y)) create_window(APP_NOTEPAD, "Notepad", 300, 200);
@@ -612,8 +622,6 @@ static void on_click(int x, int y) {
 
 void gui_demo_run(void) {
     syslog_write("GUI: Starting desktop environment...");
-    
-    // CRITICAL: Ensure interrupts are enabled, otherwise timers and mouse will fail
     __asm__ volatile("sti");
 
     graphics_enable_double_buffer();
@@ -627,11 +635,10 @@ void gui_demo_run(void) {
 
     bool running = true;
     while(running) {
-        // Prevent CPU starvation by yielding to interrupts
         timer_wait(1); 
 
         char c = keyboard_poll_char();
-        if (c == 27) running = false; // ESC to exit
+        if (c == 27) running = false; 
 
         Window* top = get_top_window();
         if (c && top && top->visible && !top->minimized && top->type == APP_NOTEPAD) {
@@ -658,7 +665,6 @@ void gui_demo_run(void) {
         graphics_swap_buffer();
     }
 
-    // Cleanup
     for(int i=0; i<MAX_WINDOWS; i++) if(windows[i]) kfree(windows[i]);
     graphics_fill_rect(0, 0, screen_w, screen_h, COL_BLACK);
 }
