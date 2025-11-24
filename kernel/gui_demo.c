@@ -125,7 +125,7 @@ static uint32_t desktop_col_top = 0xFF2D73A8;
 static uint32_t desktop_col_bot = 0xFF103050;
 
 // --- Cursor Bitmap (Arrow) ---
-static const uint8_t CURSOR_BITMAP[19][12] = {
+const uint8_t CURSOR_BITMAP[19][12] = {
     {1,1,0,0,0,0,0,0,0,0,0,0}, {1,2,1,0,0,0,0,0,0,0,0,0}, {1,2,2,1,0,0,0,0,0,0,0,0},
     {1,2,2,2,1,0,0,0,0,0,0,0}, {1,2,2,2,2,1,0,0,0,0,0,0}, {1,2,2,2,2,2,1,0,0,0,0,0},
     {1,2,2,2,2,2,2,1,0,0,0,0}, {1,2,2,2,2,2,2,2,1,0,0,0}, {1,2,2,2,2,2,2,2,2,1,0,0},
@@ -306,7 +306,6 @@ static void handle_settings_click(Window* w, int x, int y) {
         int bx = cx + 10 + (i * 60);
         int by = cy + 100;
         if (rect_contains(bx, by, 50, 24, x, y)) {
-            // Valid Ring 3 call because we share memory space in this monolithic kernel
             mouse_set_sensitivity(sense_map[i]);
             return;
         }
@@ -316,10 +315,7 @@ static void handle_settings_click(Window* w, int x, int y) {
 static void handle_terminal_input(Window* w, char c) {
     TerminalState* ts = &w->state.term;
     if (c == '\n') {
-        // Shift history
         for (int i=0; i<5; i++) str_copy(ts->history[i], ts->history[i+1]);
-        
-        // Add command to history
         char line[80];
         str_copy(line, ts->prompt);
         int p_len = kstrlen_local(line);
@@ -327,26 +323,19 @@ static void handle_terminal_input(Window* w, char c) {
         line[p_len] = 0;
         str_copy(ts->history[5], line);
 
-        // Execute
         if (kstrcmp(ts->input, "exit") == 0) { close_window(w->id); return; }
         else if (kstrcmp(ts->input, "cls") == 0 || kstrcmp(ts->input, "clear") == 0) { 
             for(int k=0; k<6; k++) ts->history[k][0] = 0; 
         }
         else if (kstrcmp(ts->input, "help") == 0) {
             for (int k=0; k<5; k++) str_copy(ts->history[k], ts->history[k+1]);
-            str_copy(ts->history[5], "  cmds: help, cls, exit, date");
-        }
-        else if (kstrcmp(ts->input, "date") == 0) {
-            for (int k=0; k<5; k++) str_copy(ts->history[k], ts->history[k+1]);
-            str_copy(ts->history[5], "  [Date Syscall Pending]");
+            str_copy(ts->history[5], "  cmds: help, cls, exit");
         }
         else if (ts->input_len > 0) {
             for (int k=0; k<5; k++) str_copy(ts->history[k], ts->history[k+1]);
             str_copy(ts->history[5], "  Command not found.");
         }
-        
-        ts->input[0] = 0; 
-        ts->input_len = 0;
+        ts->input[0] = 0; ts->input_len = 0;
     } else if (c == '\b') {
         if (ts->input_len > 0) ts->input[--ts->input_len] = 0;
     } else if (c >= 32 && c <= 126 && ts->input_len < 60) {
@@ -356,19 +345,16 @@ static void handle_terminal_input(Window* w, char c) {
 }
 
 static void handle_calc_logic(Window* w, char key) {
-    if (key != 0) return; // Only handling clicks here for now
-    
+    if (key != 0) return;
     int cx = w->x + 14; 
     int cy = w->y + WIN_CAPTION_H + 54;
     const char* btns = "789/456*123-C0=+";
-    
     for(int b=0; b<16; b++) {
         int bx = cx+(b%4)*40;
         int by = cy+(b/4)*35;
         if (rect_contains(bx, by, 35, 30, mouse.x, mouse.y)) {
             char c = btns[b];
             CalcState* s = &w->state.calc;
-            
             if (c >= '0' && c <= '9') {
                 int d = c - '0';
                 if (s->new_entry) { s->current_val = d; s->new_entry = false; }
@@ -384,7 +370,7 @@ static void handle_calc_logic(Window* w, char key) {
                 else if (s->op == '/') { if(s->current_val!=0) s->current_val = s->accumulator / s->current_val; }
                 s->op = 0; s->new_entry = true;
             }
-            return; // Click handled
+            return;
         }
     }
 }
@@ -409,12 +395,9 @@ static void draw_gradient_rect(int x, int y, int w, int h, uint32_t c1, uint32_t
     for (int i=0; i<h; i++) {
         uint8_t r1 = (c1 >> 16) & 0xFF, g1 = (c1 >> 8) & 0xFF, b1 = c1 & 0xFF;
         uint8_t r2 = (c2 >> 16) & 0xFF, g2 = (c2 >> 8) & 0xFF, b2 = c2 & 0xFF;
-        
-        // Simple linear interpolation
         uint8_t r = r1 + ((int)(r2 - r1) * i) / h;
         uint8_t g = g1 + ((int)(g2 - g1) * i) / h;
         uint8_t b = b1 + ((int)(b2 - b1) * i) / h;
-        
         uint32_t col = 0xFF000000 | (r << 16) | (g << 8) | b;
         graphics_fill_rect(x, y+i, w, 1, col);
     }
@@ -447,7 +430,6 @@ static void render_terminal(Window* w, int cx, int cy) {
 
 static void render_notepad(Window* w, int cx, int cy) {
     draw_bevel_rect(cx+2, cy+2, w->w-4, w->h-WIN_CAPTION_H-4, COL_WHITE, true);
-    // Crude multi-line rendering could go here, simple single line for now
     graphics_draw_string_scaled(cx+6, cy+6, w->state.notepad.buffer, COL_BLACK, COL_WHITE, 1);
     if ((timer_get_ticks() / 15) % 2) {
         graphics_fill_rect(cx+6+(w->state.notepad.length*8), cy+6, 2, 10, COL_BLACK);
@@ -694,6 +676,12 @@ static void on_click(int x, int y) {
                 // Apps
                 if (w->type == APP_CALC) handle_calc_logic(w, 0); 
                 if (w->type == APP_SETTINGS) handle_settings_click(w, x, y);
+                if (w->type == APP_FILES) {
+                    int ly = w->y + WIN_CAPTION_H + 28; size_t cnt = fs_file_count();
+                    for(size_t f=0; f<cnt; f++) {
+                        if(rect_contains(w->x+4, ly+(f*18), w->w-8, 18, x, y)) { w->state.files.selected_index=f; return; }
+                    }
+                }
                 
                 return; // Handled, don't click icons below
             }
@@ -708,41 +696,50 @@ static void on_click(int x, int y) {
 }
 
 void gui_demo_run(void) {
+    // 1. Log start
     syscall_log("GUI: Ring 3 Desktop Started");
-    g_gui_running = true;
     
+    // 2. Ensure flag is set (redundant safety)
+    gui_set_running(true);
+    
+    // 3. Setup graphics
     graphics_enable_double_buffer();
-    screen_w = graphics_get_width(); screen_h = graphics_get_height();
+    screen_w = graphics_get_width();
+    screen_h = graphics_get_height();
     
+    // 4. Init Windows
     for(int i=0; i<MAX_WINDOWS; i++) windows[i] = NULL;
     create_window(APP_WELCOME, "Welcome", 300, 160);
 
     bool running = true;
     while(running) {
-        timer_wait(1); 
+        // FIX: Render FIRST, then wait. 
+        // This ensures we see the desktop immediately even if timer_wait hangs or delays.
         
+        // A. Input Handling
         char c = keyboard_poll_char();
-        if (c == 27) running = false;
+        if (c == 27) running = false; // ESC to exit
         
+        // Window Input
         Window* top = get_top_window();
         if (c && top && top->visible && !top->minimized && top->focused) {
             if (top->type == APP_NOTEPAD) {
                 NotepadState* ns = &top->state.notepad;
-                if (c == '\b') { if (ns->length > 0) ns->buffer[--ns->length] = 0; }
-                else if (c >= 32 && c <= 126 && ns->length < 510) { ns->buffer[ns->length++] = c; ns->buffer[ns->length] = 0; }
             } else if (top->type == APP_TERMINAL) {
                 handle_terminal_input(top, c);
             }
         }
 
+        // Mouse Input
         prev_mouse = mouse;
         syscall_get_mouse(&mouse);
+                if (c == '\b') { if (ns->length > 0) ns->buffer[--ns->length] = 0; }
+                else if (c >= 32 && c <= 126 && ns->length < 510) { ns->buffer[ns->length++] = c; ns->buffer[ns->length] = 0; }
         
         if (mouse.left_button && top && top->visible && top->dragging) {
             top->x = mouse.x - top->drag_off_x; 
             top->y = mouse.y - top->drag_off_y;
-            
-            // Clamp to screen
+            // Clamp
             if (top->x < 0) top->x = 0;
             if (top->y < 0) top->y = 0;
             if (top->x > screen_w - 40) top->x = screen_w - 40;
@@ -755,12 +752,21 @@ void gui_demo_run(void) {
             for(int i=0; i<MAX_WINDOWS; i++) if(windows[i]) windows[i]->dragging = false;
         }
         
+        // B. Render
         render_desktop();
         graphics_swap_buffer();
+
+        // C. Wait
+        timer_wait(1); 
     }
     
+    // Cleanup
     for(int i=0; i<MAX_WINDOWS; i++) if(windows[i]) kfree(windows[i]);
+    
+    // Clear screen to black
     graphics_fill_rect(0, 0, screen_w, screen_h, COL_BLACK);
+    // Force swap to show black screen
+    graphics_swap_buffer(); 
     
     g_gui_running = false;
     syscall_exit();
