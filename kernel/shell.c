@@ -20,6 +20,7 @@
 #include "ata.h"    
 #include "banner.h"
 #include "gui_demo.h" // Includes the GUI entry point
+#include "scheduler.h" // For spawning user task
 
 struct shell_command {
     const char* name;
@@ -57,13 +58,15 @@ static void command_beep(const char* args);
 static void command_disktest(const char* args);
 static void command_banner(const char* args);
 static void command_gui(const char* args);
+static void command_usermode(const char* args);
 
 static const struct shell_command COMMANDS[] = {
     {"help", command_help, "Show this help message"},
     {"about", command_about, "Learn more about " OS_NAME},
     {"clear", command_clear, "Clear the screen"},
     {"banner", command_banner, "Show moving banner screensaver"},
-    {"gui", command_gui, "Launch Windows XP-style GUI demo"},
+    {"gui", command_gui, "Launch Windows XP-style GUI demo (Kernel Mode)"},
+    {"usermode", command_usermode, "Launch GUI in Ring 3 (User Mode)"},
     {"time", command_time, "Show current RTC date/time"},
     {"uptime", command_uptime, "Show time since boot"},  
     {"sleep", command_sleep, "Pause for N seconds"},     
@@ -367,6 +370,26 @@ static void command_gui(const char* args) {
     background_render();
     shell_print_banner();
     timer_set_callback(background_animate);
+}
+
+static void user_gui_wrapper(void) {
+    // Running in Ring 3, but with IOPL=3, so hardware access works.
+    timer_set_callback(NULL);
+    gui_demo_run();
+    // Since we cannot return easily to Ring 0 shell flow without syscalls, just hang
+    while(1) __asm__ volatile("hlt");
+}
+
+static void command_usermode(const char* args) {
+    (void)args;
+    kprintf("Switching to User Mode (Ring 3)...\n");
+    // Spawn the task
+    spawn_user_task(user_gui_wrapper);
+    
+    // Halt the kernel shell so it doesn't interfere
+    // In a real OS, the kernel would go idle or schedule other things.
+    // Here we just loop to let the scheduler run the GUI task.
+    while(1) __asm__ volatile("hlt");
 }
 
 static void command_echo(const char* args) {
