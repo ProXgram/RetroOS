@@ -8,7 +8,7 @@
 #include "keyboard.h"
 #include "timer.h"
 #include "graphics.h"
-#include "mouse.h" // Added for mouse handler
+#include "mouse.h"
 
 struct interrupt_frame {
     uint64_t rip;
@@ -42,6 +42,9 @@ static struct idt_entry g_idt[256];
 #define PIC2_DATA    0xA1
 #define PIC_EOI      0x20
 
+// External assembly handler for syscalls
+extern void isr_syscall(void);
+
 static void syslog_write_hex(const char* label, uint64_t value) {
     char buffer[96];
     size_t index = 0;
@@ -49,12 +52,8 @@ static void syslog_write_hex(const char* label, uint64_t value) {
         buffer[index] = label[index];
         index++;
     }
-    if (index < sizeof(buffer) - 1) {
-        buffer[index++] = '0';
-    }
-    if (index < sizeof(buffer) - 1) {
-        buffer[index++] = 'x';
-    }
+    if (index < sizeof(buffer) - 1) { buffer[index++] = '0'; }
+    if (index < sizeof(buffer) - 1) { buffer[index++] = 'x'; }
     for (int shift = 60; shift >= 0 && index < sizeof(buffer) - 1; shift -= 4) {
         uint8_t nibble = (uint8_t)((value >> shift) & 0xF);
         buffer[index++] = (char)(nibble < 10 ? ('0' + nibble) : ('A' + (nibble - 10)));
@@ -65,56 +64,35 @@ static void syslog_write_hex(const char* label, uint64_t value) {
 
 static void halt_on_invalid(const char* message) {
     syslog_write(message);
-    for (;;) {
-        __asm__ volatile("cli; hlt");
-    }
+    for (;;) { __asm__ volatile("cli; hlt"); }
 }
 
 static void pic_remap_and_mask(void) {
-    outb(PIC1_COMMAND, 0x11);
-    io_wait();
-    outb(PIC2_COMMAND, 0x11);
-    io_wait();
-
-    outb(PIC1_DATA, 0x20);
-    io_wait();
-    outb(PIC2_DATA, 0x28);
-    io_wait();
-
-    outb(PIC1_DATA, 0x04);
-    io_wait();
-    outb(PIC2_DATA, 0x02);
-    io_wait();
-
-    outb(PIC1_DATA, 0x01);
-    io_wait();
-    outb(PIC2_DATA, 0x01);
-    io_wait();
-
-    // Mask everything initially, except:
-    // IRQ 0 (Timer)
-    // IRQ 1 (Keyboard)
-    // IRQ 2 (Cascade - CRITICAL for Slave PIC/Mouse)
-    outb(PIC1_DATA, 0xF8); // 1111 1000
-    outb(PIC2_DATA, 0xFF); // Mask all slave IRQs (Mouse enabled later)
-
+    outb(PIC1_COMMAND, 0x11); io_wait();
+    outb(PIC2_COMMAND, 0x11); io_wait();
+    outb(PIC1_DATA, 0x20); io_wait();
+    outb(PIC2_DATA, 0x28); io_wait();
+    outb(PIC1_DATA, 0x04); io_wait();
+    outb(PIC2_DATA, 0x02); io_wait();
+    outb(PIC1_DATA, 0x01); io_wait();
+    outb(PIC2_DATA, 0x01); io_wait();
+    // Unmask Timer, Keyboard, Cascade(2) for mouse
+    outb(PIC1_DATA, 0xF8); 
+    outb(PIC2_DATA, 0xFF);
     syslog_write("PIC remapped. Enabled: Timer, Kbd, Cascade");
 }
 
 void interrupts_enable_irq(uint8_t irq) {
     uint16_t port;
     uint8_t value;
-
-    if (irq < 8) {
-        port = PIC1_DATA;
-    } else {
-        port = PIC2_DATA;
-        irq -= 8;
-    }
-
+    if (irq < 8) { port = PIC1_DATA; } else { port = PIC2_DATA; irq -= 8; }
     value = inb(port) & ~(1 << irq);
     outb(port, value);
 }
+
+// ... (Exception handlers omitted for brevity, assume existing code remains) ...
+// For the output block, I must include the full file content or the user's file breaks.
+// I will re-include the panic handlers below.
 
 static const char* const EXCEPTION_NAMES[] = {
     "Divide-by-zero", "Debug", "NMI", "Breakpoint", "Overflow", 
@@ -124,36 +102,24 @@ static const char* const EXCEPTION_NAMES[] = {
     "Machine Check", "SIMD FPU", "Virtualization", "Control Prot"
 };
 
-// Panic Drawing State
 static size_t panic_line = 0;
-
 static void panic_draw_bg(void) {
     if (graphics_get_width() > 0) {
-        // Fill Blue (0xFF0000AA)
         graphics_fill_rect(0, 0, graphics_get_width(), graphics_get_height(), 0xFF0000AA);
     }
     panic_line = 0;
 }
-
 static void panic_write_line(const char* text) {
-    if (graphics_get_width() == 0) return; // Cannot draw if graphics not init
-    
-    int x = 10;
-    int y = 10 + (panic_line * 10); // 10px padding + 8px font + 2px spacing
-    
+    if (graphics_get_width() == 0) return;
+    int x = 10; int y = 10 + (panic_line * 10);
     for (int i = 0; text[i] != '\0'; i++) {
         graphics_draw_char(x + (i * 8), y, text[i], 0xFFFFFFFF, 0xFF0000AA);
     }
     panic_line++;
 }
-
 static void panic_write_hex_line(const char* label, uint64_t value) {
-    char buffer[80];
-    size_t index = 0;
-    while (label[index] != '\0' && index < sizeof(buffer) - 1) {
-        buffer[index] = label[index];
-        index++;
-    }
+    char buffer[80]; size_t index = 0;
+    while (label[index] != '\0' && index < sizeof(buffer) - 1) { buffer[index] = label[index]; index++; }
     if (index < sizeof(buffer) - 1) buffer[index++] = '0';
     if (index < sizeof(buffer) - 1) buffer[index++] = 'x';
     for (int shift = 60; shift >= 0 && index < sizeof(buffer) - 1; shift -= 4) {
@@ -163,36 +129,21 @@ static void panic_write_hex_line(const char* label, uint64_t value) {
     buffer[index] = '\0';
     panic_write_line(buffer);
 }
-
-static void panic_write_vector_line(uint8_t vector) {
-    panic_write_hex_line("Exception Vector: ", vector);
-}
-
+static void panic_write_vector_line(uint8_t vector) { panic_write_hex_line("Exception Vector: ", vector); }
 static void exception_panic(uint8_t vector, uint64_t error_code, bool has_error_code, const struct interrupt_frame* frame) {
-    // Ensure interrupts are disabled
     __asm__ volatile("cli");
-    
     panic_draw_bg();
     panic_write_line("!!! SYSTEM PANIC (GUI MODE) !!!");
     panic_write_vector_line(vector);
-    
-    if (vector < sizeof(EXCEPTION_NAMES)/sizeof(char*)) {
-        panic_write_line(EXCEPTION_NAMES[vector]);
-    }
-    
-    if (has_error_code) {
-        panic_write_hex_line("Error code: ", error_code);
-    }
-    
+    if (vector < sizeof(EXCEPTION_NAMES)/sizeof(char*)) { panic_write_line(EXCEPTION_NAMES[vector]); }
+    if (has_error_code) { panic_write_hex_line("Error code: ", error_code); }
     if (frame != NULL) {
         panic_write_hex_line("RIP: ", frame->rip);
         panic_write_hex_line("CS: ", frame->cs);
         panic_write_hex_line("RFLAGS: ", frame->rflags);
         panic_write_hex_line("RSP: ", frame->rsp);
     }
-    
     panic_write_line("System halted.");
-    
     for (;;) __asm__ volatile("hlt");
 }
 
@@ -200,78 +151,25 @@ static void exception_panic(uint8_t vector, uint64_t error_code, bool has_error_
     __attribute__((interrupt)) static void handler_##num(struct interrupt_frame* frame) { \
         exception_panic((uint8_t)(num), 0, false, frame); \
     }
-
 #define DECLARE_ERR_HANDLER(num) \
     __attribute__((interrupt)) static void handler_##num(struct interrupt_frame* frame, uint64_t error_code) { \
         exception_panic((uint8_t)(num), error_code, true, frame); \
     }
 
-DECLARE_NOERR_HANDLER(0);
-DECLARE_NOERR_HANDLER(1);
+DECLARE_NOERR_HANDLER(0); DECLARE_NOERR_HANDLER(1);
 __attribute__((interrupt)) static void handler_2(struct interrupt_frame* frame) { (void)frame; }
-DECLARE_NOERR_HANDLER(3);
-DECLARE_NOERR_HANDLER(4);
-DECLARE_NOERR_HANDLER(5);
-DECLARE_NOERR_HANDLER(6);
-DECLARE_NOERR_HANDLER(7);
-DECLARE_ERR_HANDLER(8);
-DECLARE_NOERR_HANDLER(9);
-DECLARE_ERR_HANDLER(10);
-DECLARE_ERR_HANDLER(11);
-DECLARE_ERR_HANDLER(12);
-DECLARE_ERR_HANDLER(13);
-DECLARE_ERR_HANDLER(14);
-DECLARE_NOERR_HANDLER(15);
-DECLARE_NOERR_HANDLER(16);
-DECLARE_ERR_HANDLER(17);
-DECLARE_NOERR_HANDLER(18);
-DECLARE_NOERR_HANDLER(19);
-DECLARE_NOERR_HANDLER(20);
-DECLARE_ERR_HANDLER(21);
-DECLARE_NOERR_HANDLER(22);
-DECLARE_NOERR_HANDLER(23);
-DECLARE_NOERR_HANDLER(24);
-DECLARE_NOERR_HANDLER(25);
-DECLARE_NOERR_HANDLER(26);
-DECLARE_NOERR_HANDLER(27);
-DECLARE_NOERR_HANDLER(28);
-DECLARE_NOERR_HANDLER(29);
-DECLARE_NOERR_HANDLER(30);
-DECLARE_NOERR_HANDLER(31);
+DECLARE_NOERR_HANDLER(3); DECLARE_NOERR_HANDLER(4); DECLARE_NOERR_HANDLER(5); DECLARE_NOERR_HANDLER(6); DECLARE_NOERR_HANDLER(7);
+DECLARE_ERR_HANDLER(8); DECLARE_NOERR_HANDLER(9); DECLARE_ERR_HANDLER(10); DECLARE_ERR_HANDLER(11); DECLARE_ERR_HANDLER(12);
+DECLARE_ERR_HANDLER(13); DECLARE_ERR_HANDLER(14); DECLARE_NOERR_HANDLER(15); DECLARE_NOERR_HANDLER(16); DECLARE_ERR_HANDLER(17);
+DECLARE_NOERR_HANDLER(18); DECLARE_NOERR_HANDLER(19); DECLARE_NOERR_HANDLER(20); DECLARE_ERR_HANDLER(21); DECLARE_NOERR_HANDLER(22);
+DECLARE_NOERR_HANDLER(23); DECLARE_NOERR_HANDLER(24); DECLARE_NOERR_HANDLER(25); DECLARE_NOERR_HANDLER(26); DECLARE_NOERR_HANDLER(27);
+DECLARE_NOERR_HANDLER(28); DECLARE_NOERR_HANDLER(29); DECLARE_NOERR_HANDLER(30); DECLARE_NOERR_HANDLER(31);
 
-/* Optimized Interrupt Handlers with direct EOI */
-
-__attribute__((interrupt)) static void handler_irq_master(struct interrupt_frame* frame) {
-    (void)frame;
-    outb(PIC1_COMMAND, PIC_EOI);
-}
-
-__attribute__((interrupt)) static void handler_irq_slave(struct interrupt_frame* frame) {
-    (void)frame;
-    outb(PIC2_COMMAND, PIC_EOI);
-    outb(PIC1_COMMAND, PIC_EOI);
-}
-
-__attribute__((interrupt)) static void handler_irq_keyboard(struct interrupt_frame* frame) {
-    (void)frame;
-    uint8_t scancode = inb(0x60);
-    outb(PIC1_COMMAND, PIC_EOI);
-    keyboard_push_byte(scancode);
-}
-
-__attribute__((interrupt)) static void handler_irq_timer(struct interrupt_frame* frame) {
-    (void)frame;
-    timer_handler();
-    outb(PIC1_COMMAND, PIC_EOI);
-}
-
-// --- NEW MOUSE HANDLER ---
-__attribute__((interrupt)) static void handler_irq_mouse(struct interrupt_frame* frame) {
-    (void)frame;
-    mouse_handle_interrupt();
-    outb(PIC2_COMMAND, PIC_EOI);
-    outb(PIC1_COMMAND, PIC_EOI);
-}
+__attribute__((interrupt)) static void handler_irq_master(struct interrupt_frame* frame) { (void)frame; outb(PIC1_COMMAND, PIC_EOI); }
+__attribute__((interrupt)) static void handler_irq_slave(struct interrupt_frame* frame) { (void)frame; outb(PIC2_COMMAND, PIC_EOI); outb(PIC1_COMMAND, PIC_EOI); }
+__attribute__((interrupt)) static void handler_irq_keyboard(struct interrupt_frame* frame) { (void)frame; uint8_t scancode = inb(0x60); outb(PIC1_COMMAND, PIC_EOI); keyboard_push_byte(scancode); }
+__attribute__((interrupt)) static void handler_irq_timer(struct interrupt_frame* frame) { (void)frame; timer_handler(); outb(PIC1_COMMAND, PIC_EOI); }
+__attribute__((interrupt)) static void handler_irq_mouse(struct interrupt_frame* frame) { (void)frame; mouse_handle_interrupt(); outb(PIC2_COMMAND, PIC_EOI); outb(PIC1_COMMAND, PIC_EOI); }
 
 static void idt_set_gate(uint8_t vector, void* handler) {
     uint64_t address = (uint64_t)handler;
@@ -295,67 +193,47 @@ static void idt_set_gate_with_ist(uint8_t vector, void* handler, uint8_t ist) {
     g_idt[vector].zero = 0;
 }
 
+// Set up the IDT with the 0x80 Syscall vector using User DPL (Ring 3 access)
+static void idt_set_syscall_gate(uint8_t vector, void* handler) {
+    uint64_t address = (uint64_t)handler;
+    g_idt[vector].offset_low = (uint16_t)(address & 0xFFFF);
+    g_idt[vector].selector = 0x08;
+    g_idt[vector].ist = 0;
+    // Type 0xEE = 11101110 (Present, DPL=3, Gate=Interrupt 64-bit)
+    // This allows Ring 3 code to trigger this interrupt.
+    g_idt[vector].type_attr = 0xEE; 
+    g_idt[vector].offset_mid = (uint16_t)((address >> 16) & 0xFFFF);
+    g_idt[vector].offset_high = (uint32_t)((address >> 32) & 0xFFFFFFFF);
+    g_idt[vector].zero = 0;
+}
+
 void interrupts_init(void) {
     syslog_write("Trace: entering interrupts_init");
-
     pic_remap_and_mask();
 
-    idt_set_gate(0, handler_0);
-    idt_set_gate(1, handler_1);
-    idt_set_gate(2, handler_2);
-    idt_set_gate(3, handler_3);
-    idt_set_gate(4, handler_4);
-    idt_set_gate(5, handler_5);
-    idt_set_gate(6, handler_6);
-    idt_set_gate(7, handler_7);
+    idt_set_gate(0, handler_0); idt_set_gate(1, handler_1); idt_set_gate(2, handler_2); idt_set_gate(3, handler_3);
+    idt_set_gate(4, handler_4); idt_set_gate(5, handler_5); idt_set_gate(6, handler_6); idt_set_gate(7, handler_7);
     idt_set_gate_with_ist(8, handler_8, 1);
-    idt_set_gate(9, handler_9);
-    idt_set_gate(10, handler_10);
-    idt_set_gate(11, handler_11);
-    idt_set_gate(12, handler_12);
-    idt_set_gate(13, handler_13);
-    idt_set_gate(14, handler_14);
-    idt_set_gate(15, handler_15);
-    idt_set_gate(16, handler_16);
-    idt_set_gate(17, handler_17);
-    idt_set_gate(18, handler_18);
-    idt_set_gate(19, handler_19);
-    idt_set_gate(20, handler_20);
-    idt_set_gate(21, handler_21);
-    idt_set_gate(22, handler_22);
-    idt_set_gate(23, handler_23);
-    idt_set_gate(24, handler_24);
-    idt_set_gate(25, handler_25);
-    idt_set_gate(26, handler_26);
-    idt_set_gate(27, handler_27);
-    idt_set_gate(28, handler_28);
-    idt_set_gate(29, handler_29);
-    idt_set_gate(30, handler_30);
-    idt_set_gate(31, handler_31);
+    idt_set_gate(9, handler_9); idt_set_gate(10, handler_10); idt_set_gate(11, handler_11); idt_set_gate(12, handler_12);
+    idt_set_gate(13, handler_13); idt_set_gate(14, handler_14); idt_set_gate(15, handler_15); idt_set_gate(16, handler_16);
+    idt_set_gate(17, handler_17); idt_set_gate(18, handler_18); idt_set_gate(19, handler_19); idt_set_gate(20, handler_20);
+    idt_set_gate(21, handler_21); idt_set_gate(22, handler_22); idt_set_gate(23, handler_23); idt_set_gate(24, handler_24);
+    idt_set_gate(25, handler_25); idt_set_gate(26, handler_26); idt_set_gate(27, handler_27); idt_set_gate(28, handler_28);
+    idt_set_gate(29, handler_29); idt_set_gate(30, handler_30); idt_set_gate(31, handler_31);
 
-    for (uint8_t vector = 0x20; vector < 0x28; vector++) {
-        idt_set_gate(vector, handler_irq_master);
-    }
-    for (uint8_t vector = 0x28; vector < 0x30; vector++) {
-        idt_set_gate(vector, handler_irq_slave);
-    }
+    for (uint8_t vector = 0x20; vector < 0x28; vector++) { idt_set_gate(vector, handler_irq_master); }
+    for (uint8_t vector = 0x28; vector < 0x30; vector++) { idt_set_gate(vector, handler_irq_slave); }
 
-    // Handlers
     idt_set_gate(0x20, handler_irq_timer);
     idt_set_gate(0x21, handler_irq_keyboard);
-    idt_set_gate(0x2C, handler_irq_mouse); // Register IRQ 12 (0x20 + 12)
-
-    const struct idt_descriptor descriptor = {
-        .limit = (uint16_t)(sizeof(g_idt) - 1),
-        .base = (uint64_t)g_idt,
-    };
-
-    syslog_write_hex("IDT base: ", descriptor.base);
+    idt_set_gate(0x2C, handler_irq_mouse);
     
-    if (g_idt[8].selector != 0x08 || g_idt[8].ist != 1) {
-        halt_on_invalid("Critical: IDT vector 8 misconfigured.");
-    }
+    // Register Syscall Handler (Int 0x80)
+    idt_set_syscall_gate(0x80, isr_syscall);
 
+    const struct idt_descriptor descriptor = { .limit = (uint16_t)(sizeof(g_idt) - 1), .base = (uint64_t)g_idt };
+    syslog_write_hex("IDT base: ", descriptor.base);
+    if (g_idt[8].selector != 0x08 || g_idt[8].ist != 1) { halt_on_invalid("Critical: IDT vector 8 misconfigured."); }
     __asm__ volatile("lidt %0" : : "m"(descriptor));
-    syslog_write("Trace: interrupts_init complete");
+    syslog_write("Trace: interrupts_init complete (Syscalls enabled)");
 }
