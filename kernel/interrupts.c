@@ -91,10 +91,14 @@ static void pic_remap_and_mask(void) {
     outb(PIC2_DATA, 0x01);
     io_wait();
 
-    outb(PIC1_DATA, 0xFC);
-    outb(PIC2_DATA, 0xFF);
+    // Mask everything initially, except:
+    // IRQ 0 (Timer)
+    // IRQ 1 (Keyboard)
+    // IRQ 2 (Cascade - CRITICAL for Slave PIC/Mouse)
+    outb(PIC1_DATA, 0xF8); // 1111 1000
+    outb(PIC2_DATA, 0xFF); // Mask all slave IRQs (Mouse enabled later)
 
-    syslog_write("PIC remapped (0x20/0x28). Unmasked: Timer, Keyboard");
+    syslog_write("PIC remapped. Enabled: Timer, Kbd, Cascade");
 }
 
 void interrupts_enable_irq(uint8_t irq) {
