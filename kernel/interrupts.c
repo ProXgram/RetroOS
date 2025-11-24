@@ -76,7 +76,7 @@ static void pic_remap_and_mask(void) {
     outb(PIC2_DATA, 0x02); io_wait();
     outb(PIC1_DATA, 0x01); io_wait();
     outb(PIC2_DATA, 0x01); io_wait();
-    // Unmask Timer, Keyboard, Cascade(2) for mouse
+    // Unmask Timer(0), Keyboard(1), Cascade(2) for mouse(12)
     outb(PIC1_DATA, 0xF8); 
     outb(PIC2_DATA, 0xFF);
     syslog_write("PIC remapped. Enabled: Timer, Kbd, Cascade");
@@ -89,10 +89,6 @@ void interrupts_enable_irq(uint8_t irq) {
     value = inb(port) & ~(1 << irq);
     outb(port, value);
 }
-
-// ... (Exception handlers omitted for brevity, assume existing code remains) ...
-// For the output block, I must include the full file content or the user's file breaks.
-// I will re-include the panic handlers below.
 
 static const char* const EXCEPTION_NAMES[] = {
     "Divide-by-zero", "Debug", "NMI", "Breakpoint", "Overflow", 
@@ -168,7 +164,15 @@ DECLARE_NOERR_HANDLER(28); DECLARE_NOERR_HANDLER(29); DECLARE_NOERR_HANDLER(30);
 __attribute__((interrupt)) static void handler_irq_master(struct interrupt_frame* frame) { (void)frame; outb(PIC1_COMMAND, PIC_EOI); }
 __attribute__((interrupt)) static void handler_irq_slave(struct interrupt_frame* frame) { (void)frame; outb(PIC2_COMMAND, PIC_EOI); outb(PIC1_COMMAND, PIC_EOI); }
 __attribute__((interrupt)) static void handler_irq_keyboard(struct interrupt_frame* frame) { (void)frame; uint8_t scancode = inb(0x60); outb(PIC1_COMMAND, PIC_EOI); keyboard_push_byte(scancode); }
-__attribute__((interrupt)) static void handler_irq_timer(struct interrupt_frame* frame) { (void)frame; timer_handler(); outb(PIC1_COMMAND, PIC_EOI); }
+
+// FIX: Send EOI *before* calling handler logic. 
+// If timer_handler calls schedule(), we switch tasks and never return here to send EOI, causing a hang.
+__attribute__((interrupt)) static void handler_irq_timer(struct interrupt_frame* frame) { 
+    (void)frame; 
+    outb(PIC1_COMMAND, PIC_EOI); 
+    timer_handler(); 
+}
+
 __attribute__((interrupt)) static void handler_irq_mouse(struct interrupt_frame* frame) { (void)frame; mouse_handle_interrupt(); outb(PIC2_COMMAND, PIC_EOI); outb(PIC1_COMMAND, PIC_EOI); }
 
 static void idt_set_gate(uint8_t vector, void* handler) {
@@ -193,14 +197,11 @@ static void idt_set_gate_with_ist(uint8_t vector, void* handler, uint8_t ist) {
     g_idt[vector].zero = 0;
 }
 
-// Set up the IDT with the 0x80 Syscall vector using User DPL (Ring 3 access)
 static void idt_set_syscall_gate(uint8_t vector, void* handler) {
     uint64_t address = (uint64_t)handler;
     g_idt[vector].offset_low = (uint16_t)(address & 0xFFFF);
     g_idt[vector].selector = 0x08;
     g_idt[vector].ist = 0;
-    // Type 0xEE = 11101110 (Present, DPL=3, Gate=Interrupt 64-bit)
-    // This allows Ring 3 code to trigger this interrupt.
     g_idt[vector].type_attr = 0xEE; 
     g_idt[vector].offset_mid = (uint16_t)((address >> 16) & 0xFFFF);
     g_idt[vector].offset_high = (uint32_t)((address >> 32) & 0xFFFFFFFF);
@@ -228,7 +229,6 @@ void interrupts_init(void) {
     idt_set_gate(0x21, handler_irq_keyboard);
     idt_set_gate(0x2C, handler_irq_mouse);
     
-    // Register Syscall Handler (Int 0x80)
     idt_set_syscall_gate(0x80, isr_syscall);
 
     const struct idt_descriptor descriptor = { .limit = (uint16_t)(sizeof(g_idt) - 1), .base = (uint64_t)g_idt };
