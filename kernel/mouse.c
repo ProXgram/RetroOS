@@ -8,10 +8,8 @@
 #define MOUSE_PORT_STATUS  0x64
 #define MOUSE_PORT_CMD     0x64
 
-// Sensitivity: 1.0 provides the most accurate 1:1 tracking for PS/2
-// Higher values cause the guest cursor to move faster than the host cursor,
-// leading to immediate desynchronization.
-#define MOUSE_SENSITIVITY  1
+// Global sensitivity variable (modifiable by settings)
+static int g_mouse_sensitivity = 1;
 
 static uint8_t g_mouse_cycle = 0;
 static int8_t  g_mouse_byte[3];
@@ -43,6 +41,17 @@ static void mouse_write(uint8_t write) {
 static uint8_t mouse_read(void) {
     mouse_wait(true);
     return inb(MOUSE_PORT_DATA);
+}
+
+// --- Sensitivity Controls ---
+void mouse_set_sensitivity(int sense) {
+    if (sense < 1) sense = 1;
+    if (sense > 10) sense = 10;
+    g_mouse_sensitivity = sense;
+}
+
+int mouse_get_sensitivity(void) {
+    return g_mouse_sensitivity;
 }
 
 void mouse_init(void) {
@@ -110,13 +119,12 @@ void mouse_handle_interrupt(void) {
             g_mouse_cycle = 0;
 
             // Packet ready
-            // Use standard 1:1 sensitivity to minimize drift against host cursor
-            int dx = (int8_t)g_mouse_byte[1] * MOUSE_SENSITIVITY;
-            int dy = (int8_t)g_mouse_byte[2] * MOUSE_SENSITIVITY;
+            // Apply variable sensitivity
+            int dx = (int8_t)g_mouse_byte[1] * g_mouse_sensitivity;
+            int dy = (int8_t)g_mouse_byte[2] * g_mouse_sensitivity;
             
-            // We ignore overflow bits. Discarding packets on overflow causes
-            // the mouse to 'stuck' during fast movement, which feels like lag/desync.
-            // It's better to process the clipped movement than no movement.
+            // Note: Removed overflow checking to prevent "stuck" cursor during fast movement.
+            // Even if the hardware says overflow, processing the movement is better than ignoring it.
 
             // Standard PS/2 mouse Y is inverted relative to screen
             g_mouse_x += dx;
