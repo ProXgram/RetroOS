@@ -19,8 +19,8 @@
 #include "kstdio.h" 
 #include "ata.h"    
 #include "banner.h"
-#include "gui_demo.h" // Includes the GUI entry point
-#include "scheduler.h" // For spawning user task
+#include "gui_demo.h"
+#include "scheduler.h"
 
 struct shell_command {
     const char* name;
@@ -109,13 +109,11 @@ static uint8_t get_rtc_register(int reg) {
 
 static void command_time(const char* args) {
     (void)args;
-    while (get_rtc_register(0x0A) & 0x80); // Wait for update
-    // Simple RTC read (BCD conversion omitted for brevity, assumed standardized)
+    while (get_rtc_register(0x0A) & 0x80);
     uint8_t second = get_rtc_register(0x00);
     uint8_t minute = get_rtc_register(0x02);
     uint8_t hour   = get_rtc_register(0x04);
     
-    // Quick BCD conversion
     second = (second & 0x0F) + ((second / 16) * 10);
     minute = (minute & 0x0F) + ((minute / 16) * 10);
     hour   = ((hour & 0x0F) + ((hour / 16) * 10));
@@ -163,10 +161,7 @@ static void command_calc(const char* args) {
     kprintf("Result: %d\n", (int)result);
 }
 
-// ... Color parsing helpers omitted for brevity but assumed present ...
-// (Retaining your existing helpers for color/filename parsing)
 static int resolve_color_name(const char* input, const char** end_ptr) {
-    // (Existing logic)
     int best_match = -1;
     size_t best_len = 0;
     for (int i = 0; i < 16; i++) {
@@ -235,7 +230,7 @@ static void command_about(const char* args) {
 
 static void command_clear(const char* args) {
     (void)args;
-    background_render(); // Redraw static background
+    background_render(); 
     shell_print_banner();
 }
 
@@ -319,11 +314,11 @@ static void command_logs(const char* args) {
 
 static void command_snake(const char* args) {
     (void)args;
-    timer_set_callback(NULL); // Stop background animation
+    timer_set_callback(NULL); 
     snake_game_run();
     background_render();
     shell_print_banner();
-    timer_set_callback(background_animate); // Restart
+    timer_set_callback(background_animate); 
 }
 
 static void command_beep(const char* args) {
@@ -365,9 +360,8 @@ static void user_gui_wrapper(void) {
     timer_set_callback(NULL);
     gui_demo_run();
     
-    // Since we lack proper process cleanup and syscalls for exit,
-    // we halt if the GUI returns.
-    while(1) __asm__ volatile("hlt");
+    // FIX: Use pause instead of hlt loop to avoid GPF in User Mode
+    while(1) __asm__ volatile("pause");
 }
 
 static void command_gui(const char* args) {
@@ -377,10 +371,9 @@ static void command_gui(const char* args) {
     // Spawn the task
     spawn_user_task(user_gui_wrapper);
     
-    // Halt the kernel shell to prevent it from stealing input
-    // The OS will switch to the new task on the next timer interrupt.
-    // To return to the shell, the user must currently reboot.
-    // (A 'waitpid' or 'join' would be needed for a clean return).
+    // Halt the kernel shell to prevent it from stealing input.
+    // We use a yield loop (wait) instead of hlt just to be safe, 
+    // though shell is Ring 0 so hlt is technically allowed.
     while(true) {
         timer_wait(100);
     }
@@ -399,7 +392,6 @@ static void execute_command(const char* input) {
     if (*trimmed == '\0') return;
     keyboard_history_record(trimmed);
 
-    // Split command name from args
     char cmd_name[32];
     size_t i = 0;
     while(trimmed[i] && trimmed[i] != ' ' && i < 31) {
@@ -427,7 +419,6 @@ void shell_run(void) {
 
     for (;;) {
         shell_print_prompt();
-        // We pass NULL because the Timer now handles the idle animation!
         keyboard_read_line_ex(input, sizeof(input), NULL);
         execute_command(input);
     }
