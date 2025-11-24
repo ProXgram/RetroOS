@@ -1,5 +1,7 @@
 #include "heap.h"
 #include "syslog.h"
+#include <stdbool.h>
+
 
 // A simple linked-list First-Fit allocator
 // Header for each block
