@@ -145,8 +145,15 @@ static void int_to_str(int v, char* buf) {
 
 // --- Window Management (Pointer based) ---
 
-// Brings the window at 'index' to the front (end of array)
-// This just swaps pointers, it does not copy structs!
+// Helper to find the window at the top of the visual stack
+static Window* get_top_window(void) {
+    for (int i = MAX_WINDOWS - 1; i >= 0; i--) {
+        if (windows[i] != NULL) return windows[i];
+    }
+    return NULL;
+}
+
+// Brings the window at 'index' to the front (end of occupied list)
 static void focus_window(int index) {
     if (index < 0 || index >= MAX_WINDOWS) return;
     if (windows[index] == NULL) return;
@@ -554,14 +561,16 @@ static void on_click(int x, int y) {
     // Window Click
     // Iterate backwards to find top-most first
     for (int i = MAX_WINDOWS - 1; i >= 0; i--) {
-        if (windows[i] && windows[i]->visible && !windows[i]->minimized) {
-            if (rect_contains(windows[i]->x, windows[i]->y, windows[i]->w, windows[i]->h, x, y)) {
+        // Capture pointer FIRST because focus_window changes the array index
+        Window* w = windows[i]; 
+        if (w && w->visible && !w->minimized) {
+            if (rect_contains(w->x, w->y, w->w, w->h, x, y)) {
                 focus_window(i);
-                Window* w = windows[MAX_WINDOWS - 1]; // After focus, it's at the top
+                // w is still valid even after moving in the array
 
                 // Buttons
                 int by = w->y + 5, cx = w->x + w->w - 25;
-                if (rect_contains(cx, by, 20, 18, x, y)) { close_window(MAX_WINDOWS-1); return; }
+                if (rect_contains(cx, by, 20, 18, x, y)) { close_window(MAX_WINDOWS-1); return; } // After focus, it IS at top
                 if (rect_contains(cx-22, by, 20, 18, x, y)) { toggle_maximize(w); return; }
                 if (rect_contains(cx-44, by, 20, 18, x, y)) { w->minimized = true; return; }
                 
@@ -618,13 +627,13 @@ void gui_demo_run(void) {
 
     bool running = true;
     while(running) {
-        // Halt until the next interrupt so mouse/keyboard IRQs keep
-        // flowing and we don't spin at 100% CPU.
-        __asm__ volatile("hlt");
+        // Prevent CPU starvation by yielding to interrupts
+        timer_wait(1); 
+
         char c = keyboard_poll_char();
         if (c == 27) running = false; // ESC to exit
 
-        Window* top = windows[MAX_WINDOWS-1];
+        Window* top = get_top_window();
         if (c && top && top->visible && !top->minimized && top->type == APP_NOTEPAD) {
             NotepadState* ns = &top->state.notepad;
             if (c == '\b') { if (ns->length > 0) ns->buffer[--ns->length] = 0; }
