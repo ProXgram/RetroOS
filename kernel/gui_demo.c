@@ -83,7 +83,6 @@ typedef struct {
 // --- State ---
 // Array of pointers to windows.
 // Windows are allocated on the heap via kmalloc.
-// Initialized to NULL by BSS section automatically.
 static Window* windows[MAX_WINDOWS];
 
 static bool start_menu_open = false;
@@ -603,12 +602,11 @@ static void on_click(int x, int y) {
 }
 
 void gui_demo_run(void) {
-    // CRITICAL: Enable interrupts to allow Timer and Mouse events to fire!
-    // Without this, timer_wait() will hang forever.
-    __asm__ volatile("sti");
-
     syslog_write("GUI: Starting desktop environment...");
     
+    // CRITICAL: Ensure interrupts are enabled, otherwise timers and mouse will fail
+    __asm__ volatile("sti");
+
     graphics_enable_double_buffer();
     screen_w = graphics_get_width();
     screen_h = graphics_get_height();
@@ -620,19 +618,13 @@ void gui_demo_run(void) {
 
     bool running = true;
     while(running) {
-        // Remove explicit timer_wait. 
-        // The heavy rendering loop acts as a natural frame limiter.
-        // timer_wait(1); 
+        // Prevent CPU starvation by yielding to interrupts
+        timer_wait(1); 
 
         char c = keyboard_poll_char();
         if (c == 27) running = false; // ESC to exit
 
-        // Check if we have windows before accessing them
-        Window* top = NULL;
-        if (windows[MAX_WINDOWS-1] != NULL) {
-            top = windows[MAX_WINDOWS-1];
-        }
-
+        Window* top = windows[MAX_WINDOWS-1];
         if (c && top && top->visible && !top->minimized && top->type == APP_NOTEPAD) {
             NotepadState* ns = &top->state.notepad;
             if (c == '\b') { if (ns->length > 0) ns->buffer[--ns->length] = 0; }
@@ -661,4 +653,3 @@ void gui_demo_run(void) {
     for(int i=0; i<MAX_WINDOWS; i++) if(windows[i]) kfree(windows[i]);
     graphics_fill_rect(0, 0, screen_w, screen_h, COL_BLACK);
 }
-//t
