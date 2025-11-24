@@ -1,10 +1,8 @@
-//tes
 #include "gui_demo.h"
 #include "graphics.h"
 #include "keyboard.h"
-#include "mouse.h" // For MouseState definition only
+#include "mouse.h" // For MouseState definition
 #include "timer.h"
-#include "syslog.h"
 #include "kstring.h"
 #include "kstdio.h"
 #include "fs.h"
@@ -12,27 +10,55 @@
 #include "heap.h"
 #include <stdbool.h>
 
-// --- STRICT RING 3 ADAPTATIONS ---
+// Global flag to coordinate with the Kernel Shell
+static volatile bool g_gui_running = false;
+
+bool gui_is_running(void) {
+    return g_gui_running;
+}
+
+// --- RING 3 SYSCALL WRAPPERS ---
+
+static void syscall_log(const char* msg) {
+    // Syscall 2: Log
+    __asm__ volatile(
+        "int $0x80"
+        : 
+        : "D"((uint64_t)2), "S"(msg) 
+        : "memory"
+    );
+}
 
 static void syscall_shutdown(void) {
     // Syscall 4: Shutdown
     __asm__ volatile(
         "int $0x80"
         : 
-        : "D"((uint64_t)4) // RDI = 4
+        : "D"((uint64_t)4) 
         : "memory"
     );
 }
 
 static void syscall_get_mouse(MouseState* out) {
     // Syscall 5: Get Mouse
-    // RDI = 5, RSI = pointer to out
     __asm__ volatile(
         "int $0x80"
         : 
         : "D"((uint64_t)5), "S"(out) 
         : "memory"
     );
+}
+
+static void syscall_exit(void) {
+    // Syscall 1: Exit
+    __asm__ volatile(
+        "int $0x80"
+        : 
+        : "D"((uint64_t)1) 
+        : "memory"
+    );
+    // Should never return, but loop just in case
+    while(1) __asm__ volatile("pause");
 }
 
 // ---------------------------------
@@ -61,7 +87,7 @@ static void syscall_get_mouse(MouseState* out) {
 #define COL_GREEN       0xFF00FF00
 
 // --- Global Desktop Appearance ---
-static uint32_t desktop_col_top = 0xFF2D73A8; // Default Blue
+static uint32_t desktop_col_top = 0xFF2D73A8;
 static uint32_t desktop_col_bot = 0xFF103050;
 
 // --- Types ---
@@ -92,7 +118,7 @@ typedef struct {
     char prompt[16];
     char input[64];
     int input_len;
-    char history[5][64]; // Last 5 lines of output
+    char history[5][64];
 } TerminalState;
 
 typedef struct {
@@ -136,24 +162,12 @@ static void create_window(AppType type, const char* title, int w, int h);
 
 // --- Cursor Bitmap (Arrow) ---
 static const uint8_t CURSOR_BITMAP[19][12] = {
-    {1,1,0,0,0,0,0,0,0,0,0,0},
-    {1,2,1,0,0,0,0,0,0,0,0,0},
-    {1,2,2,1,0,0,0,0,0,0,0,0},
-    {1,2,2,2,1,0,0,0,0,0,0,0},
-    {1,2,2,2,2,1,0,0,0,0,0,0},
-    {1,2,2,2,2,2,1,0,0,0,0,0},
-    {1,2,2,2,2,2,2,1,0,0,0,0},
-    {1,2,2,2,2,2,2,2,1,0,0,0},
-    {1,2,2,2,2,2,2,2,2,1,0,0},
-    {1,2,2,2,2,2,2,2,2,2,1,0},
-    {1,2,2,2,2,2,1,1,1,1,1,1},
-    {1,2,2,2,2,2,1,0,0,0,0,0},
-    {1,2,1,1,2,2,1,0,0,0,0,0},
-    {1,1,0,1,2,2,1,0,0,0,0,0},
-    {0,0,0,0,1,2,2,1,0,0,0,0},
-    {0,0,0,0,1,2,2,1,0,0,0,0},
-    {0,0,0,0,0,1,2,2,1,0,0,0},
-    {0,0,0,0,0,1,2,2,1,0,0,0},
+    {1,1,0,0,0,0,0,0,0,0,0,0}, {1,2,1,0,0,0,0,0,0,0,0,0}, {1,2,2,1,0,0,0,0,0,0,0,0},
+    {1,2,2,2,1,0,0,0,0,0,0,0}, {1,2,2,2,2,1,0,0,0,0,0,0}, {1,2,2,2,2,2,1,0,0,0,0,0},
+    {1,2,2,2,2,2,2,1,0,0,0,0}, {1,2,2,2,2,2,2,2,1,0,0,0}, {1,2,2,2,2,2,2,2,2,1,0,0},
+    {1,2,2,2,2,2,2,2,2,2,1,0}, {1,2,2,2,2,2,1,1,1,1,1,1}, {1,2,2,2,2,2,1,0,0,0,0,0},
+    {1,2,1,1,2,2,1,0,0,0,0,0}, {1,1,0,1,2,2,1,0,0,0,0,0}, {0,0,0,0,1,2,2,1,0,0,0,0},
+    {0,0,0,0,1,2,2,1,0,0,0,0}, {0,0,0,0,0,1,2,2,1,0,0,0}, {0,0,0,0,0,1,2,2,1,0,0,0},
     {0,0,0,0,0,0,1,1,0,0,0,0}
 };
 
@@ -172,10 +186,8 @@ static void int_to_str(int v, char* buf) {
     int j = 0; while (i > 0) buf[j++] = tmp[--i]; buf[j] = 0;
 }
 
-// --- RTC (Stubbed for User Mode security) ---
+// --- RTC (Stubbed for User Mode) ---
 static void get_time_string(char* buf) {
-    // In strict Ring 3, we can't read CMOS ports directly.
-    // For now, we just hardcode a placeholder or would need a syscall.
     str_copy(buf, "12:00");
 }
 
@@ -219,17 +231,15 @@ static void create_window(AppType type, const char* title, int w, int h) {
     else if (type == APP_FILES) { win->state.files.selected_index = -1; win->state.files.scroll_offset = 0; }
     else if (type == APP_TERMINAL) {
         str_copy(win->state.term.prompt, "> ");
-        win->state.term.input[0] = 0;
-        win->state.term.input_len = 0;
+        win->state.term.input[0] = 0; win->state.term.input_len = 0;
         for(int k=0; k<5; k++) win->state.term.history[k][0] = 0;
         str_copy(win->state.term.history[0], "Nostalux GUI Shell");
         str_copy(win->state.term.history[1], "Type 'help' or 'ls'");
     }
-    
     windows[slot] = win; focus_window(slot);
 }
 
-// --- Drawing ---
+// --- Drawing Helpers ---
 static void draw_gradient_rect(int x, int y, int w, int h, uint32_t c1, uint32_t c2) {
     for (int i=0; i<h; i++) {
         uint8_t r1 = (c1 >> 16) & 0xFF, g1 = (c1 >> 8) & 0xFF, b1 = c1 & 0xFF;
@@ -249,7 +259,7 @@ static void draw_bevel_rect(int x, int y, int w, int h, uint32_t fill, bool sunk
     graphics_fill_rect(x, y+h-1, w, 1, br); graphics_fill_rect(x+w-1, y, 1, h, br);  
 }
 
-// --- App Renderers ---
+// --- Renderers ---
 static void render_notepad(Window* w, int cx, int cy) {
     draw_bevel_rect(cx+2, cy+2, w->w-4, w->h-WIN_CAPTION_H-4, COL_WHITE, true);
     graphics_draw_string_scaled(cx+6, cy+6, w->state.notepad.buffer, COL_BLACK, COL_WHITE, 1);
@@ -285,9 +295,7 @@ static void render_file_manager(Window* w, int cx, int cy) {
 }
 static void render_terminal(Window* w, int cx, int cy) {
     graphics_fill_rect(cx, cy, w->w-8, w->h-WIN_CAPTION_H-8, COL_BLACK);
-    for(int i=0; i<5; i++) {
-        graphics_draw_string_scaled(cx+4, cy+4+(i*10), w->state.term.history[i], COL_GREEN, COL_BLACK, 1);
-    }
+    for(int i=0; i<5; i++) graphics_draw_string_scaled(cx+4, cy+4+(i*10), w->state.term.history[i], COL_GREEN, COL_BLACK, 1);
     int input_y = cy + 4 + (5*10);
     graphics_draw_string_scaled(cx+4, input_y, w->state.term.prompt, COL_GREEN, COL_BLACK, 1);
     graphics_draw_string_scaled(cx+20, input_y, w->state.term.input, COL_WHITE, COL_BLACK, 1);
@@ -296,57 +304,24 @@ static void render_terminal(Window* w, int cx, int cy) {
         graphics_fill_rect(cursor_x, input_y, 8, 8, COL_GREEN);
     }
 }
-
 static void render_settings(Window* w, int cx, int cy) {
     draw_bevel_rect(cx, cy, w->w-8, w->h-WIN_CAPTION_H-8, COL_WIN_BODY, false);
-    
     graphics_draw_string_scaled(cx+10, cy+10, "Background Color:", COL_BLACK, COL_WIN_BODY, 1);
-    
-    uint32_t colors[] = { 0xFF2D73A8, 0xFF2D882D, 0xFF882D2D, 0xFF333333 }; // Blue, Green, Red, Black
+    uint32_t colors[] = { 0xFF2D73A8, 0xFF2D882D, 0xFF882D2D, 0xFF333333 };
     for (int i = 0; i < 4; i++) {
-        int bx = cx + 10 + (i * 40);
-        int by = cy + 30;
-        
+        int bx = cx + 10 + (i * 40); int by = cy + 30;
         bool h = rect_contains(bx, by, 30, 30, mouse.x, mouse.y);
-        if (h) graphics_fill_rect(bx-2, by-2, 34, 34, COL_BLACK); // Highlight
+        if (h) graphics_fill_rect(bx-2, by-2, 34, 34, COL_BLACK);
         graphics_fill_rect(bx, by, 30, 30, colors[i]);
     }
-
-    // Mouse Sensitivity
-    graphics_draw_string_scaled(cx+10, cy+80, "Mouse Speed:", COL_BLACK, COL_WIN_BODY, 1);
-    const char* speeds[] = { "Slow", "Med", "Fast" };
-    int sense_map[] = { 1, 2, 4 };
-    int current_sense = mouse_get_sensitivity();
-    
-    for (int i = 0; i < 3; i++) {
-        int bx = cx + 10 + (i * 60);
-        int by = cy + 100;
-        bool active = (current_sense == sense_map[i]);
-        bool h = rect_contains(bx, by, 50, 24, mouse.x, mouse.y);
-        bool p = h && mouse.left_button;
-        
-        uint32_t col = active ? COL_START_HOVER : (h ? COL_BTN_HOVER : 0xFFDDDDDD);
-        if (p) col = COL_BTN_PRESS;
-        
-        draw_bevel_rect(bx, by, 50, 24, col, active || p);
-        
-        uint32_t txt = active ? COL_WHITE : COL_BLACK;
-        graphics_draw_string_scaled(bx+10, by+8, speeds[i], txt, col, 1);
-    }
 }
-
 static void render_system_info(Window* w, int cx, int cy) {
     (void)w;
     graphics_draw_string_scaled(cx+20, cy+20, "NostaluxOS v1.0", COL_BLACK, COL_WIN_BODY, 2);
     const struct system_profile* p = system_profile_info();
     char mem[32]; int_to_str(p->memory_total_kb / 1024, mem);
-    char res[32]; int_to_str(screen_w, res);
     graphics_draw_string_scaled(cx+20, cy+60, "Memory: ", 0xFF555555, COL_WIN_BODY, 1);
     graphics_draw_string_scaled(cx+90, cy+60, mem, COL_BLACK, COL_WIN_BODY, 1);
-    graphics_draw_string_scaled(cx+120, cy+60, "MB", COL_BLACK, COL_WIN_BODY, 1);
-    graphics_draw_string_scaled(cx+20, cy+80, "Display:", 0xFF555555, COL_WIN_BODY, 1);
-    graphics_draw_string_scaled(cx+90, cy+80, res, COL_BLACK, COL_WIN_BODY, 1);
-    graphics_draw_string_scaled(cx+130, cy+80, "px", COL_BLACK, COL_WIN_BODY, 1);
 }
 
 static void render_window(Window* w) {
@@ -384,9 +359,7 @@ static void render_window(Window* w) {
 }
 
 static void render_cursor(void) {
-    int mx = mouse.x;
-    int my = mouse.y;
-    
+    int mx = mouse.x; int my = mouse.y;
     for(int y=0; y<19; y++) {
         for(int x=0; x<12; x++) {
             uint8_t p = CURSOR_BITMAP[y][x];
@@ -399,9 +372,9 @@ static void render_cursor(void) {
 static void render_desktop(void) {
     draw_gradient_rect(0, 0, screen_w, screen_h - TASKBAR_H, desktop_col_top, desktop_col_bot);
     
-    const char* warn = "STRICT RING 3 - NO I/O ALLOWED";
-    int warn_w = kstrlen(warn) * 8;
-    graphics_draw_string_scaled(screen_w - warn_w - 20, 10, warn, 0x80FFFFFF, 0, 1);
+    // Ring 3 Indicator
+    const char* ver = "Ring 3 Protected Mode";
+    graphics_draw_string_scaled(screen_w - (kstrlen(ver)*8) - 10, 10, ver, 0x80FFFFFF, 0, 1);
 
     struct { int x, y; const char* lbl; } icons[] = {
         {20, 20, "Terminal"}, {20, 80, "My Files"}, {20, 140, "Notepad"}, {20, 200, "Calc"}
@@ -409,11 +382,9 @@ static void render_desktop(void) {
     for (int i=0; i<4; i++) {
         bool h = rect_contains(icons[i].x, icons[i].y, 64, 55, mouse.x, mouse.y);
         if (h) graphics_fill_rect(icons[i].x, icons[i].y, 64, 55, 0x40FFFFFF);
-        
         uint32_t icol = (i==0) ? 0xFF000000 : ((i==1) ? 0xFFDDAA00 : 0xFFEEEEEE);
         graphics_fill_rect(icons[i].x+16, icons[i].y+5, 32, 28, icol);
         if (i==0) graphics_draw_string_scaled(icons[i].x+18, icons[i].y+8, ">_", COL_GREEN, COL_BLACK, 1);
-        
         graphics_draw_string_scaled(icons[i].x+5, icons[i].y+40, icons[i].lbl, COL_WHITE, 0, 1);
     }
 
@@ -455,44 +426,23 @@ static void render_desktop(void) {
             graphics_draw_string_scaled(35, items[i].y+6, items[i].lbl, h?COL_WHITE:COL_BLACK, h?COL_BTN_HOVER:COL_WIN_BODY, 1);
         }
     }
-
     render_cursor();
 }
 
 static void handle_settings_click(Window* w, int x, int y) {
-    int cx = w->x + 4; 
-    int cy = w->y + WIN_CAPTION_H + 4;
+    int cx = w->x + 4; int cy = w->y + WIN_CAPTION_H + 4;
     uint32_t colors_top[] = { 0xFF2D73A8, 0xFF2D882D, 0xFF882D2D, 0xFF333333 };
     uint32_t colors_bot[] = { 0xFF103050, 0xFF103010, 0xFF301010, 0xFF000000 };
-    
     for (int i = 0; i < 4; i++) {
-        int bx = cx + 10 + (i * 40);
-        int by = cy + 30;
+        int bx = cx + 10 + (i * 40); int by = cy + 30;
         if (rect_contains(bx, by, 30, 30, x, y)) {
-            desktop_col_top = colors_top[i];
-            desktop_col_bot = colors_bot[i];
-            return;
-        }
-    }
-
-    // Mouse Speed
-    // Removed unused array declaration to fix warning
-    for (int i = 0; i < 3; i++) {
-        int bx = cx + 10 + (i * 60);
-        int by = cy + 100;
-        if (rect_contains(bx, by, 50, 24, x, y)) {
-            // Wait, we cannot call mouse_set_sensitivity directly in Ring 3!
-            // We need a syscall for this. For now, let's just allow the click but not change it
-            // to prevent crashing, or we need to add syscall_set_sensitivity.
-            // Simplification: Do nothing for now to stay crash-free.
-            return;
+            desktop_col_top = colors_top[i]; desktop_col_bot = colors_bot[i]; return;
         }
     }
 }
 
 static void on_click(int x, int y) {
     int ty = screen_h - TASKBAR_H;
-
     if (start_menu_open) {
         int my = ty - 280;
         if (x < 160 && y > my) {
@@ -506,7 +456,6 @@ static void on_click(int x, int y) {
         }
         start_menu_open = false;
     }
-
     if (y >= ty) {
         if (x < 80) { start_menu_open = !start_menu_open; return; }
         int tx = 90;
@@ -520,7 +469,6 @@ static void on_click(int x, int y) {
         }
         return;
     }
-
     for (int i = MAX_WINDOWS - 1; i >= 0; i--) {
         Window* w = windows[i];
         if (w && w->visible && !w->minimized) {
@@ -530,11 +478,9 @@ static void on_click(int x, int y) {
                 if (rect_contains(cx, by, 20, 18, x, y)) { close_window(idx); return; }
                 if (rect_contains(cx-22, by, 20, 18, x, y)) { toggle_maximize(w); return; }
                 if (rect_contains(cx-44, by, 20, 18, x, y)) { w->minimized = true; return; }
-                
                 if (y < w->y + WIN_CAPTION_H && !w->maximized) {
                     w->dragging = true; w->drag_off_x = x - w->x; w->drag_off_y = y - w->y; return;
                 }
-                
                 if (w->type == APP_CALC) handle_calc_logic(w, 0); 
                 if (w->type == APP_SETTINGS) handle_settings_click(w, x, y);
                 if (w->type == APP_FILES) {
@@ -547,7 +493,6 @@ static void on_click(int x, int y) {
             }
         }
     }
-
     if (rect_contains(20, 20, 64, 55, x, y)) create_window(APP_TERMINAL, "Terminal", 320, 240);
     else if (rect_contains(20, 80, 64, 55, x, y)) create_window(APP_FILES, "File Explorer", 400, 300);
     else if (rect_contains(20, 140, 64, 55, x, y)) create_window(APP_NOTEPAD, "Notepad", 300, 200);
@@ -618,10 +563,9 @@ static void toggle_maximize(Window* w) {
 }
 
 void gui_demo_run(void) {
-    syslog_write("GUI: Starting desktop environment...");
-    
-    // REMOVED: __asm__ volatile("sti"); (Interrupts enabled by iretq)
-    // REMOVED: mouse_init(); (Kernel did it, doing it here crashes Ring 3)
+    // Flag START
+    syscall_log("GUI: Ring 3 Desktop Started");
+    g_gui_running = true;
     
     graphics_enable_double_buffer();
     screen_w = graphics_get_width(); screen_h = graphics_get_height();
@@ -631,15 +575,12 @@ void gui_demo_run(void) {
 
     bool running = true;
     while(running) {
-        // timer_wait calls 'pause' in user mode, which is safe.
+        // Pause to yield CPU. In Ring 3, pause is safe.
         timer_wait(1); 
         
-        // Keyboard polling via syscall isn't implemented yet in this demo,
-        // but since we are linking kernel code, keyboard_poll_char uses inb
-        // which will GPF in strict Ring 3!
-        // FIX: For now, we assume keyboard polling still bypasses syscalls 
-        // (requires IDT access or shared mem). 
-        // Ideally: syscall_get_key();
+        // IMPORTANT: In a real separation, polling scancodes from Ring 3 
+        // without a syscall is insecure/impossible. We assume identity mapping 
+        // makes the buffer readable here for the sake of the demo.
         char c = keyboard_poll_char();
         if (c == 27) running = false;
         
@@ -655,7 +596,6 @@ void gui_demo_run(void) {
         }
 
         prev_mouse = mouse;
-        // Use System Call to get mouse state!
         syscall_get_mouse(&mouse);
         
         if (mouse.left_button && top && top->visible && top->dragging) {
@@ -668,7 +608,14 @@ void gui_demo_run(void) {
         render_desktop();
         graphics_swap_buffer();
     }
+    
+    // Cleanup
     for(int i=0; i<MAX_WINDOWS; i++) if(windows[i]) kfree(windows[i]);
     graphics_fill_rect(0, 0, screen_w, screen_h, COL_BLACK);
+    
+    // Flag STOP
+    g_gui_running = false;
+    
+    // Terminate Task via Syscall
+    syscall_exit();
 }
-// test
