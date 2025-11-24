@@ -149,7 +149,7 @@ static bool rect_contains(int x, int y, int w, int h, int px, int py) {
     return (px >= x && px < x + w && py >= y && py < y + h);
 }
 static void str_copy(char* dest, const char* src) {
-    int i = 0; while (src[i] && i < 63) { dest[i] = src[i]; i++; } dest[i] = 0;
+    int i = 0; while (src[i] && i < 31) { dest[i] = src[i]; i++; } dest[i] = 0;
 }
 static void int_to_str(int v, char* buf) {
     if (v == 0) { buf[0] = '0'; buf[1] = 0; return; }
@@ -385,12 +385,10 @@ static void render_cursor(void) {
 static void render_desktop(void) {
     draw_gradient_rect(0, 0, screen_w, screen_h - TASKBAR_H, desktop_col_top, desktop_col_bot);
     
-    // Visual hint to capture mouse
-    // Making it blink slightly to attract attention
-    static int blink = 0;
-    blink++;
-    uint32_t hint_col = (blink % 20 < 10) ? COL_RED : 0x80FFFFFF;
-    graphics_draw_string_scaled(screen_w - 240, 10, "CLICK SCREEN TO CAPTURE MOUSE", hint_col, 0, 1);
+    // Visual hint to capture mouse - PROMINENT WARNING
+    const char* warn = "CLICK SCREEN TO CAPTURE MOUSE";
+    int warn_w = kstrlen(warn) * 8;
+    graphics_draw_string_scaled(screen_w - warn_w - 20, 10, warn, 0x80FFFFFF, 0, 1);
 
     struct { int x, y; const char* lbl; } icons[] = {
         {20, 20, "Terminal"}, {20, 80, "My Files"}, {20, 140, "Notepad"}, {20, 200, "Calc"}
@@ -398,10 +396,15 @@ static void render_desktop(void) {
     for (int i=0; i<4; i++) {
         bool h = rect_contains(icons[i].x, icons[i].y, 64, 55, mouse.x, mouse.y);
         if (h) graphics_fill_rect(icons[i].x, icons[i].y, 64, 55, 0x40FFFFFF);
-        // If it's terminal, use black screen icon
-        uint32_t icol = (i==0) ? COL_BLACK : 0xFFEEEEEE;
+        
+        // Custom icon colors
+        uint32_t icol = (i==0) ? 0xFF000000 : ((i==1) ? 0xFFDDAA00 : 0xFFEEEEEE);
         graphics_fill_rect(icons[i].x+16, icons[i].y+5, 32, 28, icol);
-        if (i==0) graphics_draw_string_scaled(icons[i].x+18, icons[i].y+7, ">_", COL_GREEN, COL_BLACK, 1);
+        
+        // Terminal glyph
+        if (i==0) {
+            graphics_draw_string_scaled(icons[i].x+18, icons[i].y+8, ">_", COL_GREEN, COL_BLACK, 1);
+        }
         
         graphics_draw_string_scaled(icons[i].x+5, icons[i].y+40, icons[i].lbl, COL_WHITE, 0, 1);
     }
@@ -575,50 +578,19 @@ static void handle_terminal_input(Window* w, char c) {
     if (c == '\n') {
         // Shift history
         for (int i=0; i<4; i++) str_copy(ts->history[i], ts->history[i+1]);
+        str_copy(ts->history[4], ts->input);
         
-        // Echo command
-        char cmd_line[32];
-        str_copy(cmd_line, "> ");
-        int j = 2;
-        for(int k=0; k<ts->input_len && j<30; k++) cmd_line[j++] = ts->input[k];
-        cmd_line[j] = 0;
-        str_copy(ts->history[4], cmd_line);
-
-        // Parse command
-        if (kstrcmp(ts->input, "exit") == 0) { 
-            close_window(w->id); 
-            return; 
-        }
-        else if (kstrcmp(ts->input, "cls") == 0 || kstrcmp(ts->input, "clear") == 0) {
+        // Execute simple commands
+        if (kstrcmp(ts->input, "exit") == 0) { close_window(w->id); return; }
+        else if (kstrcmp(ts->input, "cls") == 0) {
             for(int i=0; i<5; i++) ts->history[i][0] = 0;
         }
         else if (kstrcmp(ts->input, "help") == 0) {
-            for(int i=0; i<4; i++) str_copy(ts->history[i], ts->history[i+1]);
-            str_copy(ts->history[4], "Cmds: help, ls, echo, clear, about, exit");
-        }
-        else if (kstrcmp(ts->input, "ls") == 0) {
-            size_t count = fs_file_count();
-            char buf[32];
-            for(int i=0; i<4; i++) str_copy(ts->history[i], ts->history[i+1]);
-            if (count == 0) str_copy(ts->history[4], "No files found.");
-            else {
-                // Just show the first file for brevity in this mini-terminal
-                const struct fs_file* f = fs_file_at(0);
-                str_copy(buf, "File: ");
-                int b=6; int n=0; while(f->name[n] && b<30) buf[b++] = f->name[n++]; buf[b]=0;
-                str_copy(ts->history[4], buf);
-            }
-        }
-        else if (kstrncmp(ts->input, "echo ", 5) == 0) {
-            for(int i=0; i<4; i++) str_copy(ts->history[i], ts->history[i+1]);
-            str_copy(ts->history[4], ts->input + 5);
-        }
-        else if (kstrcmp(ts->input, "about") == 0) {
-            for(int i=0; i<4; i++) str_copy(ts->history[i], ts->history[i+1]);
-            str_copy(ts->history[4], "NostaluxOS v1.0 (GUI Shell)");
+            for (int i=0; i<4; i++) str_copy(ts->history[i], ts->history[i+1]);
+            str_copy(ts->history[4], "cmds: help, cls, exit");
         }
         else if (ts->input_len > 0) {
-            for(int i=0; i<4; i++) str_copy(ts->history[i], ts->history[i+1]);
+            for (int i=0; i<4; i++) str_copy(ts->history[i], ts->history[i+1]);
             str_copy(ts->history[4], "Unknown command.");
         }
         
@@ -654,7 +626,8 @@ void gui_demo_run(void) {
 
     bool running = true;
     while(running) {
-        timer_wait(1);
+        timer_wait(1); // Replaces hlt, safely waits in ring 3 using loop/pause
+        
         char c = keyboard_poll_char();
         if (c == 27) running = false;
         
