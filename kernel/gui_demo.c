@@ -603,6 +603,10 @@ static void on_click(int x, int y) {
 }
 
 void gui_demo_run(void) {
+    // CRITICAL: Enable interrupts to allow Timer and Mouse events to fire!
+    // Without this, timer_wait() will hang forever.
+    __asm__ volatile("sti");
+
     syslog_write("GUI: Starting desktop environment...");
     
     graphics_enable_double_buffer();
@@ -616,13 +620,19 @@ void gui_demo_run(void) {
 
     bool running = true;
     while(running) {
-        // Prevent CPU starvation by yielding to interrupts
-        timer_wait(1); 
+        // Remove explicit timer_wait. 
+        // The heavy rendering loop acts as a natural frame limiter.
+        // timer_wait(1); 
 
         char c = keyboard_poll_char();
         if (c == 27) running = false; // ESC to exit
 
-        Window* top = windows[MAX_WINDOWS-1];
+        // Check if we have windows before accessing them
+        Window* top = NULL;
+        if (windows[MAX_WINDOWS-1] != NULL) {
+            top = windows[MAX_WINDOWS-1];
+        }
+
         if (c && top && top->visible && !top->minimized && top->type == APP_NOTEPAD) {
             NotepadState* ns = &top->state.notepad;
             if (c == '\b') { if (ns->length > 0) ns->buffer[--ns->length] = 0; }
