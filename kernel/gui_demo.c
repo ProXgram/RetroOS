@@ -480,6 +480,43 @@ static void toggle_maximize(Window* w) {
     }
 }
 
+// Helper to process calculator logic safely to avoid warnings
+static void handle_calc_logic(Window* w, char c) {
+    CalcState* s = &w->state.calc;
+    if (c >= '0' && c <= '9') {
+        int d = c - '0';
+        if (s->new_entry) {
+            s->current_val = d;
+            s->new_entry = false;
+        } else if (s->current_val < 100000000) {
+            s->current_val = s->current_val * 10 + d;
+        }
+    } else if (c == 'C') {
+        s->current_val = 0;
+        s->accumulator = 0;
+        s->op = 0;
+        s->new_entry = true;
+    } else if (c == '+' || c == '-' || c == '*' || c == '/') {
+        s->accumulator = s->current_val;
+        s->op = c;
+        s->new_entry = true;
+    } else if (c == '=') {
+        if (s->op == '+') {
+            s->current_val = s->accumulator + s->current_val;
+        } else if (s->op == '-') {
+            s->current_val = s->accumulator - s->current_val;
+        } else if (s->op == '*') {
+            s->current_val = s->accumulator * s->current_val;
+        } else if (s->op == '/') {
+            if (s->current_val != 0) {
+                s->current_val = s->accumulator / s->current_val;
+            }
+        }
+        s->op = 0;
+        s->new_entry = true;
+    }
+}
+
 static void on_click(int x, int y) {
     int ty = screen_h - TASKBAR_H;
 
@@ -539,16 +576,7 @@ static void on_click(int x, int y) {
                     int sx = w->x + 14, sy = w->y + WIN_CAPTION_H + 54;
                     for(int b=0; b<16; b++) {
                         if (rect_contains(sx + (b%4)*40, sy + (b/4)*35, 35, 30, x, y)) {
-                            CalcState* s = &w->state.calc; char c = btns[b];
-                            if (c >= '0' && c <= '9') { 
-                                if(s->new_entry){s->current_val=c-'0'; s->new_entry=false;} 
-                                else if(s->current_val<100000000) s->current_val=s->current_val*10+(c-'0');
-                            } else if (c=='C') { s->current_val=0; s->accumulator=0; s->op=0; s->new_entry=true; }
-                            else if (c=='=') {
-                                if(s->op=='+')s->current_val+=s->accumulator; if(s->op=='-')s->current_val=s->accumulator-s->current_val;
-                                if(s->op=='*')s->current_val*=s->accumulator; if(s->op=='/'&&s->current_val)s->current_val=s->accumulator/s->current_val;
-                                s->op=0; s->new_entry=true;
-                            } else { s->accumulator=s->current_val; s->op=c; s->new_entry=true; }
+                            handle_calc_logic(w, btns[b]);
                             return;
                         }
                     }
