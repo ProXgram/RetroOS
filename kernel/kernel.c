@@ -15,6 +15,7 @@
 #include "scheduler.h"
 #include "gui_demo.h"
 #include "kstdio.h"
+#include "mouse.h"
 
 // Defined in linker script
 extern uint8_t __kernel_end[];
