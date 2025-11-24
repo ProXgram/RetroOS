@@ -670,3 +670,4 @@ void gui_demo_run(void) {
     for(int i=0; i<MAX_WINDOWS; i++) if(windows[i]) kfree(windows[i]);
     graphics_fill_rect(0, 0, screen_w, screen_h, COL_BLACK);
 }
+// test
