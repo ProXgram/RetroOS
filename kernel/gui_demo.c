@@ -475,7 +475,7 @@ static void handle_settings_click(Window* w, int x, int y) {
     }
 
     // Mouse Speed
-    int sense_map[] = { 1, 2, 4 };
+    // Removed unused array declaration to fix warning
     for (int i = 0; i < 3; i++) {
         int bx = cx + 10 + (i * 60);
         int by = cy + 100;
