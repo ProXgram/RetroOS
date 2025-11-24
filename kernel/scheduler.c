@@ -74,11 +74,11 @@ void spawn_user_task(void (*entry_point)(void)) {
     *(--sp) = (uint64_t)(ustack + STACK_SIZE);
     
     // RFLAGS
-    // 0x200 = Interrupts Enabled
-    // 0x3000 = IOPL 3 (Allows Ring 3 to use IO ports/CLI/STI for RetroOS architecture)
+    // 0x200 = Interrupts Enabled (IF=1)
+    // IOPL is 0 (Bits 12-13 are 0), meaning NO hardware access.
     // 0x002 = Reserved bit (must be 1)
-    // Total: 0x3202
-    *(--sp) = 0x3202; 
+    // Total: 0x202
+    *(--sp) = 0x202; 
     
     // CS (User Code Selector | RPL 3)
     *(--sp) = 0x20 | 3;
