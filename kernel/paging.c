@@ -30,9 +30,8 @@ static uint64_t g_framebuffer_pd[512] __attribute__((aligned(PAGE_SIZE)));
 static uint64_t align_down(uint64_t value, uint64_t alignment) {
     return value & ~(alignment - 1);
 }
-static uint64_t align_up(uint64_t value, uint64_t alignment) {
-    return (value + alignment - 1) & ~(alignment - 1);
-}
+
+// Removed unused align_up function to fix warning
 
 static void initialize_identity_map(const struct BootInfo* boot_info) {
     // Flag all pages as User accessible for the hybrid demo
