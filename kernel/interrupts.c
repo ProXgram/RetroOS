@@ -44,23 +44,6 @@ static struct idt_entry g_idt[256];
 // ASM entry point for syscalls
 extern void isr_syscall(void);
 
-static void syslog_write_hex(const char* label, uint64_t value) {
-    char buffer[96];
-    size_t index = 0;
-    while (label[index] != '\0' && index < sizeof(buffer) - 1) {
-        buffer[index] = label[index];
-        index++;
-    }
-    if (index < sizeof(buffer) - 1) { buffer[index++] = '0'; }
-    if (index < sizeof(buffer) - 1) { buffer[index++] = 'x'; }
-    for (int shift = 60; shift >= 0 && index < sizeof(buffer) - 1; shift -= 4) {
-        uint8_t nibble = (uint8_t)((value >> shift) & 0xF);
-        buffer[index++] = (char)(nibble < 10 ? ('0' + nibble) : ('A' + (nibble - 10)));
-    }
-    buffer[index] = '\0';
-    syslog_write(buffer);
-}
-
 static void halt_on_invalid(const char* message) {
     syslog_write(message);
     for (;;) { __asm__ volatile("cli; hlt"); }
