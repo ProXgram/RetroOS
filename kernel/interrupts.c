@@ -223,7 +223,7 @@ void interrupts_init(void) {
     idt_set_gate(29, handler_29); idt_set_gate(30, handler_30); idt_set_gate(31, handler_31);
 
     for (uint8_t vector = 0x20; vector < 0x28; vector++) { idt_set_gate(vector, handler_irq_master); }
-    for (uint8_t vector = 0x28; vector < 0x30; vector++) { idt_set_gate(vector, handler_irq_slave); }
+    for (uint8_t vector = 0x28; vector < 0x30; vector++) { idt_set_gate(vector, handler_irq_slave); } //test
 
     idt_set_gate(0x20, handler_irq_timer);
     idt_set_gate(0x21, handler_irq_keyboard);
