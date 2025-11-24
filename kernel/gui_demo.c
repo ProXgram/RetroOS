@@ -160,7 +160,8 @@ static void get_time_string(char* buf) {
     str_copy(buf, "12:00");
 }
 
-// --- Forward Declarations ---
+// --- Forward Declarations for Renderers ---
+static void draw_bevel_rect(int x, int y, int w, int h, uint32_t fill, bool sunk);
 static void render_notepad(Window* w, int cx, int cy);
 static void render_calc(Window* w, int cx, int cy);
 static void render_file_manager(Window* w, int cx, int cy);
@@ -306,7 +307,9 @@ static void handle_terminal_input(Window* w, char c) {
         str_copy(ts->history[5], line);
 
         if (kstrcmp(ts->input, "exit") == 0) { close_window(w->id); return; }
-        else if (kstrcmp(ts->input, "cls") == 0) { for(int k=0; k<6; k++) ts->history[k][0] = 0; }
+        else if (kstrcmp(ts->input, "cls") == 0 || kstrcmp(ts->input, "clear") == 0) { 
+            for(int k=0; k<6; k++) ts->history[k][0] = 0; 
+        }
         else if (kstrcmp(ts->input, "help") == 0) {
             for (int k=0; k<5; k++) str_copy(ts->history[k], ts->history[k+1]);
             str_copy(ts->history[5], "  cmds: help, cls, exit");
@@ -315,9 +318,7 @@ static void handle_terminal_input(Window* w, char c) {
             for (int k=0; k<5; k++) str_copy(ts->history[k], ts->history[k+1]);
             str_copy(ts->history[5], "  Command not found.");
         }
-        
-        ts->input[0] = 0; 
-        ts->input_len = 0;
+        ts->input[0] = 0; ts->input_len = 0;
     } else if (c == '\b') {
         if (ts->input_len > 0) ts->input[--ts->input_len] = 0;
     } else if (c >= 32 && c <= 126 && ts->input_len < 60) {
@@ -380,9 +381,11 @@ static void draw_gradient_rect(int x, int y, int w, int h, uint32_t c1, uint32_t
     for (int i=0; i<h; i++) {
         uint8_t r1 = (c1 >> 16) & 0xFF, g1 = (c1 >> 8) & 0xFF, b1 = c1 & 0xFF;
         uint8_t r2 = (c2 >> 16) & 0xFF, g2 = (c2 >> 8) & 0xFF, b2 = c2 & 0xFF;
+        
         uint8_t r = r1 + ((int)(r2 - r1) * i) / h;
         uint8_t g = g1 + ((int)(g2 - g1) * i) / h;
         uint8_t b = b1 + ((int)(b2 - b1) * i) / h;
+        
         uint32_t col = 0xFF000000 | (r << 16) | (g << 8) | b;
         graphics_fill_rect(x, y+i, w, 1, col);
     }
@@ -543,6 +546,7 @@ static void render_desktop(void) {
     for (int i=0; i<4; i++) {
         bool h = rect_contains(icons[i].x, icons[i].y, 64, 55, mouse.x, mouse.y);
         if (h) graphics_fill_rect(icons[i].x, icons[i].y, 64, 55, 0x40FFFFFF);
+        
         uint32_t icol = (i==0) ? 0xFF000000 : ((i==1) ? 0xFFDDAA00 : 0xFFEEEEEE);
         graphics_fill_rect(icons[i].x+16, icons[i].y+5, 32, 28, icol);
         if (i==0) graphics_draw_string_scaled(icons[i].x+18, icons[i].y+8, ">_", COL_GREEN, COL_BLACK, 1);
@@ -665,6 +669,10 @@ void gui_demo_run(void) {
     for(int i=0; i<MAX_WINDOWS; i++) windows[i] = NULL;
     create_window(APP_WELCOME, "Welcome", 300, 160);
 
+    // Force initial render before waiting to ensure user sees the GUI
+    render_desktop();
+    graphics_swap_buffer();
+
     bool running = true;
     while(running) {
         Window* top = get_top_window();
@@ -704,6 +712,8 @@ void gui_demo_run(void) {
         
         render_desktop();
         graphics_swap_buffer();
+        
+        // Wait AFTER rendering
         timer_wait(1); 
     }
     
