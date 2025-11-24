@@ -59,7 +59,7 @@ typedef struct {
 } FileManagerState;
 
 typedef struct {
-    int dummy; // Reserved for future state
+    int dummy; 
 } SettingsState;
 
 typedef struct {
@@ -88,6 +88,15 @@ static bool start_menu_open = false;
 static int screen_w, screen_h;
 static MouseState mouse;
 static MouseState prev_mouse;
+
+// --- Forward Declarations ---
+static void render_system_info(Window* w, int cx, int cy);
+static void handle_calc_logic(Window* w, char key);
+static void handle_settings_click(Window* w, int x, int y);
+static void toggle_maximize(Window* w);
+static void close_window(int index);
+static int focus_window(int index);
+static void create_window(AppType type, const char* title, int w, int h);
 
 // --- Cursor Bitmap (Arrow) ---
 static const uint8_t CURSOR_BITMAP[19][12] = {
@@ -169,7 +178,11 @@ static void create_window(AppType type, const char* title, int w, int h) {
     if (!win) { syslog_write("GUI: OOM"); return; }
     win->id = slot; win->type = type; str_copy(win->title, title);
     win->w = w; win->h = h; win->x = 40 + (slot*20)%160; win->y = 40 + (slot*20)%160;
-    if (win->x + w > screen_w) win->x = 20; if (win->y + h > screen_h - TASKBAR_H) win->y = 20;
+    
+    // Fixed indentation warning
+    if (win->x + w > screen_w) win->x = 20; 
+    if (win->y + h > screen_h - TASKBAR_H) win->y = 20;
+    
     win->visible = true; win->minimized = false; win->maximized = false; win->dragging = false; win->focused = true;
     if (type == APP_NOTEPAD) { win->state.notepad.length = 0; win->state.notepad.buffer[0] = 0; }
     else if (type == APP_CALC) { win->state.calc.current_val = 0; win->state.calc.new_entry = true; }
@@ -268,6 +281,20 @@ static void render_settings(Window* w, int cx, int cy) {
     }
 }
 
+static void render_system_info(Window* w, int cx, int cy) {
+    (void)w;
+    graphics_draw_string_scaled(cx+20, cy+20, "NostaluxOS v1.0", COL_BLACK, COL_WIN_BODY, 2);
+    const struct system_profile* p = system_profile_info();
+    char mem[32]; int_to_str(p->memory_total_kb / 1024, mem);
+    char res[32]; int_to_str(screen_w, res);
+    graphics_draw_string_scaled(cx+20, cy+60, "Memory: ", 0xFF555555, COL_WIN_BODY, 1);
+    graphics_draw_string_scaled(cx+90, cy+60, mem, COL_BLACK, COL_WIN_BODY, 1);
+    graphics_draw_string_scaled(cx+120, cy+60, "MB", COL_BLACK, COL_WIN_BODY, 1);
+    graphics_draw_string_scaled(cx+20, cy+80, "Display:", 0xFF555555, COL_WIN_BODY, 1);
+    graphics_draw_string_scaled(cx+90, cy+80, res, COL_BLACK, COL_WIN_BODY, 1);
+    graphics_draw_string_scaled(cx+130, cy+80, "px", COL_BLACK, COL_WIN_BODY, 1);
+}
+
 static void render_window(Window* w) {
     if (!w || !w->visible || w->minimized) return;
     if (!w->maximized) graphics_fill_rect(w->x+4, w->y+4, w->w, w->h, 0x50000000);
@@ -301,8 +328,20 @@ static void render_window(Window* w) {
     else render_system_info(w, cx, cy);
 }
 
+static void render_cursor(void) {
+    int mx = mouse.x;
+    int my = mouse.y;
+    
+    for(int y=0; y<19; y++) {
+        for(int x=0; x<12; x++) {
+            uint8_t p = CURSOR_BITMAP[y][x];
+            if(p == 1) graphics_put_pixel(mx+x, my+y, COL_BLACK);
+            else if(p == 2) graphics_put_pixel(mx+x, my+y, COL_WHITE);
+        }
+    }
+}
+
 static void render_desktop(void) {
-    // Use dynamic background color
     draw_gradient_rect(0, 0, screen_w, screen_h - TASKBAR_H, desktop_col_top, desktop_col_bot);
     
     struct { int x, y; const char* lbl; } icons[] = {
@@ -354,11 +393,7 @@ static void render_desktop(void) {
         }
     }
 
-    // Render Mouse Cursor
-    for(int y=0; y<19; y++) for(int x=0; x<12; x++) {
-        if(CURSOR_BITMAP[y][x]==1) graphics_put_pixel(mouse.x+x, mouse.y+y, COL_BLACK);
-        else if(CURSOR_BITMAP[y][x]==2) graphics_put_pixel(mouse.x+x, mouse.y+y, COL_WHITE);
-    }
+    render_cursor();
 }
 
 static void handle_settings_click(Window* w, int x, int y) {
@@ -429,18 +464,14 @@ static void on_click(int x, int y) {
                 int idx = focus_window(i); w = windows[idx];
                 int by = w->y+5, cx = w->x+w->w-25;
                 if (rect_contains(cx, by, 20, 18, x, y)) { close_window(idx); return; }
-                if (rect_contains(cx-22, by, 20, 18, x, y)) {
-                    if(w->maximized) { w->x=w->restore_x; w->y=w->restore_y; w->w=w->restore_w; w->h=w->restore_h; w->maximized=false; }
-                    else { w->restore_x=w->x; w->restore_y=w->y; w->restore_w=w->w; w->restore_h=w->h; w->x=0; w->y=0; w->w=screen_w; w->h=screen_h-TASKBAR_H; w->maximized=true; }
-                    return;
-                }
+                if (rect_contains(cx-22, by, 20, 18, x, y)) { toggle_maximize(w); return; }
                 if (rect_contains(cx-44, by, 20, 18, x, y)) { w->minimized = true; return; }
                 
                 if (y < w->y + WIN_CAPTION_H && !w->maximized) {
                     w->dragging = true; w->drag_off_x = x - w->x; w->drag_off_y = y - w->y; return;
                 }
                 
-                if (w->type == APP_CALC) handle_calc_logic(w, 0); // Mouse logic handled in render for now or specific handler
+                if (w->type == APP_CALC) handle_calc_logic(w, 0); 
                 if (w->type == APP_SETTINGS) handle_settings_click(w, x, y);
                 if (w->type == APP_FILES) {
                     int ly = w->y + WIN_CAPTION_H + 28; size_t cnt = fs_file_count();
@@ -460,8 +491,7 @@ static void on_click(int x, int y) {
 }
 
 static void handle_calc_logic(Window* w, char key) {
-    // Logic merged with keyboard input in next step, purely pointer based click handled in render_calc
-    if (key == 0) { // Mouse Click Logic
+    if (key == 0) { 
         int cx = w->x + 14; int cy = w->y + WIN_CAPTION_H + 54;
         const char* btns = "789/456*123-C0=+";
         for(int b=0; b<16; b++) {
@@ -485,6 +515,17 @@ static void handle_calc_logic(Window* w, char key) {
                 }
             }
         }
+    }
+}
+
+static void toggle_maximize(Window* w) {
+    if (w->maximized) {
+        w->x = w->restore_x; w->y = w->restore_y; w->w = w->restore_w; w->h = w->restore_h;
+        w->maximized = false;
+    } else {
+        w->restore_x = w->x; w->restore_y = w->y; w->restore_w = w->w; w->restore_h = w->h;
+        w->x = 0; w->y = 0; w->w = screen_w; w->h = screen_h - TASKBAR_H;
+        w->maximized = true;
     }
 }
 
