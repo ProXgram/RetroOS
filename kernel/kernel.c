@@ -9,13 +9,13 @@
 #include "syslog.h"
 #include "terminal.h"
 #include "keyboard.h"
+#include "mouse.h" // Added include for mouse
 #include "timer.h" 
 #include "banner.h"
 #include "heap.h"
 #include "scheduler.h"
 #include "gui_demo.h"
 #include "kstdio.h"
-#include "mouse.h"
 
 // Defined in linker script
 extern uint8_t __kernel_end[];
@@ -29,9 +29,10 @@ static void boot_sequence(const struct BootInfo* boot_info) {
     // 1. Initialize Heap (16MB starting at 8MB mark)
     heap_init((void*)0x800000, 16 * 1024 * 1024);
 
-    // 2. Initialize Interrupts & Timer
+    // 2. Initialize Interrupts, Timer & Input
     timer_init();
     keyboard_init();
+    mouse_init(); // Initialize Mouse Driver
     
     size_t memory_bytes = memtest_detect_upper_limit();
     system_set_total_memory((uint32_t)(memory_bytes / 1024));
