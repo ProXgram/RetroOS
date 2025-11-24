@@ -2,6 +2,8 @@ BITS 64
 
 section .text
     global _start
+    global context_switch
+    global _iret_stub
     extern kmain
     extern gdt_init
     extern interrupts_init
@@ -12,50 +14,62 @@ section .text
     extern g_kernel_stack_top
 
 _start:
-    ; Disable interrupts while the IDT is being built
     cli
-
     mov rbp, 0
-    and rsp, -16              ; Align the stack to 16 bytes for System V ABI
-    sub rsp, 8                ; Account for a return address push
+    and rsp, -16
+    sub rsp, 8
 
-    ; Switch to the dedicated kernel stack
     mov rsp, [g_kernel_stack_top]
-    and rsp, -16              ; Align
-    sub rsp, 8                ; Account for return addr
+    and rsp, -16
+    sub rsp, 8
 
-    mov r12, rdi                ; preserve BootInfo pointer (passed by bootloader in RDI)
-    
-    ; Zero BSS
+    mov r12, rdi ; BootInfo
+
     mov rdi, __bss_start
     mov rcx, __bss_end
     sub rcx, rdi
     xor rax, rax
     rep stosb
 
-    ; Reset stack pointer after BSS clear just in case
-    mov rsp, [g_kernel_stack_top]
-    and rsp, -16
-    sub rsp, 8
-
     call syslog_init
     
-    ; --- FIX: Pass BootInfo to paging_init ---
     mov rdi, r12
     call paging_init
-    ; -----------------------------------------
     
     call gdt_init
     call interrupts_init
 
-    ; Re-enable interrupts
     sti
 
-    mov rdi, r12                ; restore BootInfo pointer for kmain
+    mov rdi, r12
     call kmain
 
 .hang:
     hlt
     jmp .hang
 
-section .note.GNU-stack noalloc noexec nowrite align=1
+; void context_switch(uint64_t* old_sp_ptr, uint64_t new_sp)
+; RDI = old_sp_ptr
+; RSI = new_sp
+context_switch:
+    push rbx
+    push rbp
+    push r12
+    push r13
+    push r14
+    push r15
+
+    mov [rdi], rsp      ; Save old RSP
+    mov rsp, rsi        ; Load new RSP
+
+    pop r15
+    pop r14
+    pop r13
+    pop r12
+    pop rbp
+    pop rbx
+    ret
+
+; Used by spawn_user_task to exit kernel mode
+_iret_stub:
+    iretq
