@@ -22,14 +22,12 @@ _start:
     and rsp, -16
     sub rsp, 8
 
-    ; Load kernel stack
     mov rsp, [g_kernel_stack_top]
     and rsp, -16
     sub rsp, 8
 
-    mov r12, rdi ; Save BootInfo pointer (passed in RDI)
+    mov r12, rdi ; BootInfo
 
-    ; Zero out BSS
     mov rdi, __bss_start
     mov rcx, __bss_end
     sub rcx, rdi
@@ -54,8 +52,6 @@ _start:
     jmp .hang
 
 ; void context_switch(uint64_t* old_sp_ptr, uint64_t new_sp)
-; RDI = old_sp_ptr
-; RSI = new_sp
 context_switch:
     push rbx
     push rbp
