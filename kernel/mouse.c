@@ -8,8 +8,10 @@
 #define MOUSE_PORT_STATUS  0x64
 #define MOUSE_PORT_CMD     0x64
 
-// Sensitivity factor: Increase this to make the mouse faster
-#define MOUSE_SENSITIVITY  2
+// Sensitivity: 1.0 provides the most accurate 1:1 tracking for PS/2
+// Higher values cause the guest cursor to move faster than the host cursor,
+// leading to immediate desynchronization.
+#define MOUSE_SENSITIVITY  1
 
 static uint8_t g_mouse_cycle = 0;
 static int8_t  g_mouse_byte[3];
@@ -69,6 +71,7 @@ void mouse_init(void) {
     mouse_read(); // Acknowledge
 
     // Center Mouse
+    // We start in the center because QEMU usually centers the cursor when capturing.
     g_mouse_x = graphics_get_width() / 2;
     g_mouse_y = graphics_get_height() / 2;
 
@@ -83,9 +86,7 @@ void mouse_handle_interrupt(void) {
     // Check if the interrupt is actually from the mouse (Auxiliary Device)
     // Bit 5 (0x20) of status register is 1 if data comes from mouse
     if (!(status & 0x20)) {
-        // If interrupt fired but status says it's not mouse, it might be stray keyboard data?
-        // Just read it to clear it if buffer is full
-        if (status & 0x01) inb(MOUSE_PORT_DATA);
+        if (status & 0x01) inb(MOUSE_PORT_DATA); // Flush garbage
         return; 
     }
 
@@ -94,12 +95,11 @@ void mouse_handle_interrupt(void) {
     switch(g_mouse_cycle) {
         case 0:
             // Byte 0: Y overflow, X overflow, Y sign, X sign, 1, Middle, Right, Left
-            // Bit 3 must be 1 for a standard packet.
+            // Bit 3 must be 1.
             if ((b & 0x08) == 0x08) { 
                 g_mouse_byte[0] = b;
                 g_mouse_cycle++;
             }
-            // If bit 3 isn't 1, we are out of sync. Remain in cycle 0.
             break;
         case 1:
             g_mouse_byte[1] = b;
@@ -110,32 +110,29 @@ void mouse_handle_interrupt(void) {
             g_mouse_cycle = 0;
 
             // Packet ready
-            // Apply sensitivity multiplier
+            // Use standard 1:1 sensitivity to minimize drift against host cursor
             int dx = (int8_t)g_mouse_byte[1] * MOUSE_SENSITIVITY;
             int dy = (int8_t)g_mouse_byte[2] * MOUSE_SENSITIVITY;
             
-            // Overflow bits
-            bool x_ovf = (g_mouse_byte[0] & 0x40) != 0;
-            bool y_ovf = (g_mouse_byte[0] & 0x80) != 0;
+            // We ignore overflow bits. Discarding packets on overflow causes
+            // the mouse to 'stuck' during fast movement, which feels like lag/desync.
+            // It's better to process the clipped movement than no movement.
 
-            if (!x_ovf && !y_ovf) {
-                // Standard PS/2 mouse Y is inverted relative to screen
-                // (PS/2 Up is positive, Screen Down is positive)
-                g_mouse_x += dx;
-                g_mouse_y -= dy; 
+            // Standard PS/2 mouse Y is inverted relative to screen
+            g_mouse_x += dx;
+            g_mouse_y -= dy; 
 
-                // Clamp to screen
-                int w = graphics_get_width();
-                int h = graphics_get_height();
-                
-                if (g_mouse_x < 0) g_mouse_x = 0;
-                if (g_mouse_x >= w) g_mouse_x = w - 1;
-                if (g_mouse_y < 0) g_mouse_y = 0;
-                if (g_mouse_y >= h) g_mouse_y = h - 1;
+            // Clamp to screen dimensions
+            int w = graphics_get_width();
+            int h = graphics_get_height();
+            
+            if (g_mouse_x < 0) g_mouse_x = 0;
+            if (g_mouse_x >= w) g_mouse_x = w - 1;
+            if (g_mouse_y < 0) g_mouse_y = 0;
+            if (g_mouse_y >= h) g_mouse_y = h - 1;
 
-                g_left_btn = (g_mouse_byte[0] & 0x01) != 0;
-                g_right_btn = (g_mouse_byte[0] & 0x02) != 0;
-            }
+            g_left_btn = (g_mouse_byte[0] & 0x01) != 0;
+            g_right_btn = (g_mouse_byte[0] & 0x02) != 0;
             break;
     }
 }
