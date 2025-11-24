@@ -2,8 +2,20 @@
 #include <stddef.h>
 #include <stdbool.h>
 #include "system.h"
+#include "syslog.h"
+
+// Hardcoded location for the backbuffer (4MB mark)
+// This is safe because:
+// 1. Kernel is loaded at 1MB and limited to <2MB by linker script
+// 2. Bootloader stack top is 0x3FF000 (just below 4MB)
+// 3. First 1GB is identity mapped
+#define BACK_BUFFER_ADDR 0x00400000
 
 static uint32_t* g_framebuffer = NULL;
+static uint32_t* g_draw_buffer = NULL;
+static uint32_t* g_back_buffer = (uint32_t*)BACK_BUFFER_ADDR;
+static bool g_double_buffered = false;
+
 static uint32_t g_width = 0;
 static uint32_t g_height = 0;
 static uint32_t g_pitch = 0;
@@ -12,9 +24,6 @@ static uint32_t g_pitch = 0;
 // 1 = Pixel On, 0 = Pixel Off
 static const uint8_t FONT_8X8[128][8] = {
     {0,0,0,0,0,0,0,0}, // 0x00 (Null)
-    // ... We need a visible font. Let's define basic ASCII characters conceptually
-    // For brevity in this response, I will generate a block cursor for undefined chars
-    // and implement A-Z, 0-9, and basic symbols.
     [0x20] = {0x00,0x00,0x00,0x00,0x00,0x00,0x00,0x00}, // Space
     [0x21] = {0x18,0x3C,0x3C,0x18,0x18,0x00,0x18,0x00}, // !
     [0x23] = {0x6C,0x6C,0xFE,0x6C,0xFE,0x6C,0x6C,0x00}, // #
@@ -92,21 +101,74 @@ void graphics_init(void) {
     g_width = info->width;
     g_height = info->height;
     g_pitch = info->pitch;
+    
+    // Default to direct drawing
+    g_draw_buffer = g_framebuffer;
+    g_double_buffered = false;
+}
+
+void graphics_enable_double_buffer(void) {
+    g_draw_buffer = g_back_buffer;
+    g_double_buffered = true;
+    syslog_write("Graphics: Double buffering enabled");
+}
+
+void graphics_disable_double_buffer(void) {
+    g_draw_buffer = g_framebuffer;
+    g_double_buffered = false;
+}
+
+void graphics_swap_buffer(void) {
+    if (!g_double_buffered) return;
+
+    // Copy back buffer to front buffer
+    // Pitch is in bytes. g_framebuffer is uint32* (4 bytes).
+    // The safest way is row by row.
+    
+    // Convert pitch to uint32 count (assuming 32bpp)
+    uint32_t stride = g_pitch / 4;
+    
+    uint32_t* src = g_back_buffer;
+    uint32_t* dest = g_framebuffer;
+    
+    // We assume width matches stride for the back buffer, but front buffer uses pitch.
+    // Actually, let's treat back buffer as having same stride as front for simplicity,
+    // effectively a direct memory copy if continuous.
+    
+    // Note: To be safe, we iterate pixels.
+    size_t total_pixels = g_height * stride;
+    
+    for (size_t i = 0; i < total_pixels; i++) {
+        dest[i] = src[i];
+    }
 }
 
 void graphics_put_pixel(int x, int y, uint32_t color) {
     if (x < 0 || (uint32_t)x >= g_width || y < 0 || (uint32_t)y >= g_height) return;
     
-    // Pitch is in bytes, but g_framebuffer is uint32_t* (4 bytes)
+    // Pitch is in bytes, but g_draw_buffer is uint32_t* (4 bytes)
     // So index = (y * (pitch / 4)) + x
     size_t index = y * (g_pitch / 4) + x;
-    g_framebuffer[index] = color;
+    g_draw_buffer[index] = color;
 }
 
 void graphics_fill_rect(int x, int y, int w, int h, uint32_t color) {
-    for (int j = 0; j < h; j++) {
-        for (int i = 0; i < w; i++) {
-            graphics_put_pixel(x + i, y + j, color);
+    // Optimization: Horizontal line filling
+    int end_x = x + w;
+    int end_y = y + h;
+    
+    // Clipping
+    if (x < 0) x = 0;
+    if (y < 0) y = 0;
+    if (end_x > (int)g_width) end_x = g_width;
+    if (end_y > (int)g_height) end_y = g_height;
+    
+    uint32_t stride = g_pitch / 4;
+    
+    for (int j = y; j < end_y; j++) {
+        uint32_t* row = &g_draw_buffer[j * stride];
+        for (int i = x; i < end_x; i++) {
+            row[i] = color;
         }
     }
 }
