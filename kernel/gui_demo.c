@@ -1,4 +1,4 @@
-#include "gui_demo.h"
+Thank you so much for#include "gui_demo.h"
 #include "graphics.h"
 #include "keyboard.h"
 #include "mouse.h"
@@ -725,6 +725,8 @@ void gui_demo_run(void) {
         if (c && top && top->visible && !top->minimized && top->focused) {
             if (top->type == APP_NOTEPAD) {
                 NotepadState* ns = &top->state.notepad;
+                if (c == '\b') { if (ns->length > 0) ns->buffer[--ns->length] = 0; }
+                else if (c >= 32 && c <= 126 && ns->length < 510) { ns->buffer[ns->length++] = c; ns->buffer[ns->length] = 0; }
             } else if (top->type == APP_TERMINAL) {
                 handle_terminal_input(top, c);
             }
@@ -733,8 +735,6 @@ void gui_demo_run(void) {
         // Mouse Input
         prev_mouse = mouse;
         syscall_get_mouse(&mouse);
-                if (c == '\b') { if (ns->length > 0) ns->buffer[--ns->length] = 0; }
-                else if (c >= 32 && c <= 126 && ns->length < 510) { ns->buffer[ns->length++] = c; ns->buffer[ns->length] = 0; }
         
         if (mouse.left_button && top && top->visible && top->dragging) {
             top->x = mouse.x - top->drag_off_x; 
