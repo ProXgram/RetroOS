@@ -8,6 +8,9 @@
 #define MOUSE_PORT_STATUS  0x64
 #define MOUSE_PORT_CMD     0x64
 
+// Sensitivity factor: Increase this to make the mouse faster
+#define MOUSE_SENSITIVITY  2
+
 static uint8_t g_mouse_cycle = 0;
 static int8_t  g_mouse_byte[3];
 static int     g_mouse_x = 0;
@@ -107,30 +110,24 @@ void mouse_handle_interrupt(void) {
             g_mouse_cycle = 0;
 
             // Packet ready
-            // Note: PS/2 values are 9-bit two's complement stored in 8 bits + sign bit in byte 0.
-            // However, standard cast usually works for small movements.
-            // Let's use the sign bits for robustness.
-            
-            int dx = (int8_t)g_mouse_byte[1];
-            int dy = (int8_t)g_mouse_byte[2];
+            // Apply sensitivity multiplier
+            int dx = (int8_t)g_mouse_byte[1] * MOUSE_SENSITIVITY;
+            int dy = (int8_t)g_mouse_byte[2] * MOUSE_SENSITIVITY;
             
             // Overflow bits
             bool x_ovf = (g_mouse_byte[0] & 0x40) != 0;
             bool y_ovf = (g_mouse_byte[0] & 0x80) != 0;
 
             if (!x_ovf && !y_ovf) {
-                // Standard PS/2 mouse Y is inverted relative to screen (Up is positive in math, but lower pixel Y)
-                // Wait, in PS/2:
-                // Byte 1: X movement
-                // Byte 2: Y movement (Positive = Up)
-                // Screen Y increases Down. So we subtract dy.
-                
+                // Standard PS/2 mouse Y is inverted relative to screen
+                // (PS/2 Up is positive, Screen Down is positive)
                 g_mouse_x += dx;
                 g_mouse_y -= dy; 
 
                 // Clamp to screen
                 int w = graphics_get_width();
                 int h = graphics_get_height();
+                
                 if (g_mouse_x < 0) g_mouse_x = 0;
                 if (g_mouse_x >= w) g_mouse_x = w - 1;
                 if (g_mouse_y < 0) g_mouse_y = 0;
