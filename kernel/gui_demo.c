@@ -13,23 +13,25 @@
 
 // --- STRICT RING 3 ADAPTATIONS ---
 
-// We cannot include io.h because inb/outb are privileged now.
-// We rely on Syscalls.
+// We use GCC inline assembly constraints to ensure values represent
+// the System V AMD64 ABI requirements for the syscall dispatcher.
+// RDI = Syscall Number, RSI = Arg1
 
 static void syscall_shutdown(void) {
     __asm__ volatile(
-        "mov $4, %%rdi\n" // Syscall 4 = Shutdown
-        "int $0x80\n"
-        : : : "rdi", "memory"
+        "int $0x80"
+        : 
+        : "D"((uint64_t)4) // RDI = 4
+        : "memory"
     );
 }
 
 static void syscall_get_mouse(MouseState* out) {
     __asm__ volatile(
-        "mov $5, %%rdi\n" // Syscall 5 = Get Mouse
-        "mov %0, %%rsi\n" // Arg 2 = Pointer to struct
-        "int $0x80\n"
-        : : "r"(out) : "rdi", "rsi", "memory"
+        "int $0x80"
+        : 
+        : "D"((uint64_t)5), "S"(out) // RDI = 5, RSI = pointer
+        : "memory"
     );
 }
 
@@ -172,8 +174,6 @@ static void int_to_str(int v, char* buf) {
 
 // --- RTC (Stubbed for User Mode security) ---
 static void get_time_string(char* buf) {
-    // In strict Ring 3, we can't read CMOS ports directly.
-    // For now, we just hardcode a placeholder or would need a syscall.
     str_copy(buf, "12:00");
 }
 
@@ -304,15 +304,35 @@ static void render_settings(Window* w, int cx, int cy) {
     for (int i = 0; i < 4; i++) {
         int bx = cx + 10 + (i * 40);
         int by = cy + 30;
+        
         bool h = rect_contains(bx, by, 30, 30, mouse.x, mouse.y);
         if (h) graphics_fill_rect(bx-2, by-2, 34, 34, COL_BLACK); // Highlight
         graphics_fill_rect(bx, by, 30, 30, colors[i]);
     }
+
+    // Mouse Sensitivity
+    graphics_draw_string_scaled(cx+10, cy+80, "Mouse Speed:", COL_BLACK, COL_WIN_BODY, 1);
     
-    // Mouse Sensitivity UI
-    graphics_draw_string_scaled(cx+10, cy+80, "Mouse Speed (Use Shell):", COL_BLACK, COL_WIN_BODY, 1);
-    // Note: We cannot easily set sensitivity via syscall yet without extending the syscall table.
-    // Just a placeholder UI for now.
+    const char* speeds[] = { "Slow", "Med", "Fast" };
+    int sense_map[] = { 1, 2, 4 };
+    // Use a variable on the stack, as syscalls are restricted in Ring 3 from reading globals directly
+    // (Although here the logic runs in mapped memory so reading mouse_get_sensitivity is fine if mapped).
+    int current = mouse_get_sensitivity();
+    
+    for (int i = 0; i < 3; i++) {
+        int bx = cx + 10 + (i * 60);
+        int by = cy + 100;
+        
+        bool active = (current == sense_map[i]);
+        bool h = rect_contains(bx, by, 50, 24, mouse.x, mouse.y);
+        bool p = h && mouse.left_button;
+        
+        // Draw button: Sunk if active/pressed, raised if normal
+        draw_bevel_rect(bx, by, 50, 24, (h||active) ? COL_BTN_HOVER : 0xFFDDDDDD, (p || active));
+        
+        uint32_t text_col = (h || active) ? COL_WHITE : COL_BLACK;
+        graphics_draw_string_scaled(bx+10, by+8, speeds[i], text_col, (h||active)?COL_BTN_HOVER:0xFFDDDDDD, 1);
+    }
 }
 
 static void render_system_info(Window* w, int cx, int cy) {
@@ -454,6 +474,17 @@ static void handle_settings_click(Window* w, int x, int y) {
             return;
         }
     }
+
+    // Mouse Speed
+    int sense_map[] = { 1, 2, 4 };
+    for (int i = 0; i < 3; i++) {
+        int bx = cx + 10 + (i * 60);
+        int by = cy + 100;
+        if (rect_contains(bx, by, 50, 24, x, y)) {
+            mouse_set_sensitivity(sense_map[i]);
+            return;
+        }
+    }
 }
 
 static void on_click(int x, int y) {
@@ -584,10 +615,10 @@ static void toggle_maximize(Window* w) {
 }
 
 void gui_demo_run(void) {
-    syslog_write("GUI: Starting desktop environment...");
+    // Note: Interrupts are ALREADY enabled in Ring 3. Calling sti here causes GPF if IOPL<3.
+    // Removed: __asm__ volatile("sti");
     
-    // REMOVED: __asm__ volatile("sti"); (Interrupts enabled by iretq)
-    // REMOVED: mouse_init(); (Kernel did it, doing it here crashes Ring 3)
+    // Mouse init removed from here (Kernel did it).
     
     graphics_enable_double_buffer();
     screen_w = graphics_get_width(); screen_h = graphics_get_height();
@@ -603,9 +634,12 @@ void gui_demo_run(void) {
         // Keyboard polling via syscall isn't implemented yet in this demo,
         // but since we are linking kernel code, keyboard_poll_char uses inb
         // which will GPF in strict Ring 3!
-        // FIX: For now, we assume keyboard polling still bypasses syscalls 
-        // (requires IDT access or shared mem). 
-        // Ideally: syscall_get_key();
+        // FIX: We must treat keyboard polling as a privileged action if it touches ports.
+        // However, keyboard.c buffers inputs in an interrupt handler.
+        // The `keyboard_poll_char` function only reads memory (buffers).
+        // It calls `keyboard_poll_scancode` -> `keyboard_try_pop_byte`.
+        // `keyboard_push_byte` is called by ISR.
+        // So keyboard_poll_char is safe in Ring 3!
         char c = keyboard_poll_char();
         if (c == 27) running = false;
         
