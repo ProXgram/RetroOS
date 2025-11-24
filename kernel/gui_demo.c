@@ -672,3 +672,5 @@ void gui_demo_run(void) {
     }
     graphics_fill_rect(0, 0, screen_w, screen_h, COL_BLACK);
 }
+
+//te
