@@ -1,4 +1,3 @@
-//h
 #include <stdbool.h>
 #include <stddef.h>
 #include <stdint.h>
@@ -20,8 +19,7 @@
 #include "kstdio.h" 
 #include "ata.h"    
 #include "banner.h"
-#include "scheduler.h"
-#include "gui_demo.h"
+#include "gui_demo.h" // Includes the GUI entry point
 
 struct shell_command {
     const char* name;
@@ -350,16 +348,19 @@ static void command_gui(const char* args) {
     kprintf("Spawning GUI task in Ring 3...\n");
     timer_set_callback(NULL); // Stop kernel background animation
     
-    // Launch as a User Mode task
+    // 1. Set the flag explicitly BEFORE spawning to prevent race condition.
+    gui_set_running(true);
+
+    // 2. Launch as a User Mode task
     spawn_user_task(gui_demo_run);
     
-    // Block shell execution until GUI exits
+    // 3. Block shell execution until GUI exits
     while (gui_is_running()) {
         // Yield CPU to allow GUI to run
         schedule();
     }
     
-    // Restore shell environment
+    // 4. Restore shell environment
     background_render();
     shell_print_banner();
     timer_set_callback(background_animate);
@@ -401,6 +402,6 @@ void shell_run(void) {
     for (;;) {
         shell_print_prompt();
         keyboard_read_line_ex(input, sizeof(input), NULL);
-     execute_command(input);
+        execute_command(input);
     }
 }
