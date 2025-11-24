@@ -618,9 +618,9 @@ void gui_demo_run(void) {
 
     bool running = true;
     while(running) {
-        // Prevent CPU starvation by yielding to interrupts
-        timer_wait(1); 
-
+        // Halt until the next interrupt so mouse/keyboard IRQs keep
+        // flowing and we don't spin at 100% CPU.
+        __asm__ volatile("hlt");
         char c = keyboard_poll_char();
         if (c == 27) running = false; // ESC to exit
 
