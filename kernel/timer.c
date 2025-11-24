@@ -2,6 +2,7 @@
 #include "io.h"
 #include "syslog.h"
 #include "interrupts.h"
+#include "scheduler.h" // Hook scheduler
 #include <stddef.h> 
 
 #define PIT_FREQUENCY 1193180
@@ -25,15 +26,23 @@ void timer_set_callback(timer_callback_t callback) {
 
 void timer_handler(void) {
     g_ticks++;
-    // Run animation ~25 times a second (100Hz / 4)
+    
+    // Legacy animation callback (still useful for background)
     if (g_callback != NULL && (g_ticks % 4 == 0)) {
         g_callback();
+    }
+
+    // Preemptive Scheduler Tick
+    // Switch task every 2 ticks (20ms approx)
+    if (g_ticks % 2 == 0) {
+        schedule();
     }
 }
 
 void timer_wait(int ticks) {
     uint64_t end = g_ticks + ticks;
     while (g_ticks < end) {
+        // Halt to allow scheduler to run other tasks while this one waits
         __asm__ volatile("hlt");
     }
 }
