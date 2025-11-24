@@ -19,7 +19,8 @@
 #include "kstdio.h" 
 #include "ata.h"    
 #include "banner.h"
-#include "gui_demo.h" // Includes the GUI entry point
+#include "scheduler.h"
+#include "gui_demo.h"
 
 struct shell_command {
     const char* name;
@@ -63,7 +64,7 @@ static const struct shell_command COMMANDS[] = {
     {"about", command_about, "Learn more about " OS_NAME},
     {"clear", command_clear, "Clear the screen"},
     {"banner", command_banner, "Show moving banner screensaver"},
-    {"gui", command_gui, "Launch Windows XP-style GUI demo"},
+    {"gui", command_gui, "Launch Ring 3 Desktop Environment"},
     {"time", command_time, "Show current RTC date/time"},
     {"uptime", command_uptime, "Show time since boot"},  
     {"sleep", command_sleep, "Pause for N seconds"},     
@@ -97,7 +98,6 @@ static const char* COLOR_NAMES[16] = {
     "Light Magenta", "Yellow", "White",
 };
 
-// --- Helpers ---
 #define CMOS_ADDRESS 0x70
 #define CMOS_DATA    0x71
 
@@ -108,25 +108,20 @@ static uint8_t get_rtc_register(int reg) {
 
 static void command_time(const char* args) {
     (void)args;
-    while (get_rtc_register(0x0A) & 0x80); // Wait for update
-    // Simple RTC read (BCD conversion omitted for brevity, assumed standardized)
+    while (get_rtc_register(0x0A) & 0x80); 
     uint8_t second = get_rtc_register(0x00);
     uint8_t minute = get_rtc_register(0x02);
     uint8_t hour   = get_rtc_register(0x04);
-    
-    // Quick BCD conversion
     second = (second & 0x0F) + ((second / 16) * 10);
     minute = (minute & 0x0F) + ((minute / 16) * 10);
     hour   = ((hour & 0x0F) + ((hour / 16) * 10));
-
     kprintf("RTC Time: %02u:%02u:%02u\n", hour, minute, second);
 }
 
 static void command_uptime(const char* args) {
     (void)args;
     uint64_t seconds = timer_get_uptime();
-    kprintf("System Uptime: %u seconds (%u ticks)\n", 
-            (unsigned int)seconds, (unsigned int)timer_get_ticks());
+    kprintf("System Uptime: %u seconds (%u ticks)\n", (unsigned int)seconds, (unsigned int)timer_get_ticks());
 }
 
 static void command_sleep(const char* args) {
@@ -149,23 +144,16 @@ static void command_calc(const char* args) {
     char op = *cursor++;
     cursor = kskip_spaces(cursor);
     if (!kparse_uint(&cursor, &b)) { kprintf("Usage: calc <num> <op> <num>\n"); return; }
-
     long result = 0;
     if (op == '+') result = (long)a + b;
     else if (op == '-') result = (long)a - b;
     else if (op == '*') result = (long)a * b;
-    else if (op == '/') {
-        if (b == 0) { kprintf("Error: Div by zero\n"); return; }
-        result = (long)a / b;
-    } else { kprintf("Unknown operator\n"); return; }
-    
+    else if (op == '/') { if (b == 0) { kprintf("Error: Div by zero\n"); return; } result = (long)a / b; }
+    else { kprintf("Unknown operator\n"); return; }
     kprintf("Result: %d\n", (int)result);
 }
 
-// ... Color parsing helpers omitted for brevity but assumed present ...
-// (Retaining your existing helpers for color/filename parsing)
 static int resolve_color_name(const char* input, const char** end_ptr) {
-    // (Existing logic)
     int best_match = -1;
     size_t best_len = 0;
     for (int i = 0; i < 16; i++) {
@@ -214,8 +202,6 @@ static void shell_print_prompt(void) {
     kprintf(OS_PROMPT_TEXT);
 }
 
-// --- COMMANDS ---
-
 static void command_help(const char* args) {
     (void)args;
     kprintf("Available commands:\n");
@@ -234,7 +220,7 @@ static void command_about(const char* args) {
 
 static void command_clear(const char* args) {
     (void)args;
-    background_render(); // Redraw static background
+    background_render();
     shell_print_banner();
 }
 
@@ -268,7 +254,6 @@ static void command_hexdump(const char* args) {
     const char* name = kskip_spaces(args);
     const struct fs_file* f = fs_find(name);
     if (!f) { kprintf("File not found.\n"); return; }
-    
     for(size_t i=0; i<f->size; i++) {
         if(i%16==0) kprintf("\n%04x: ", i);
         kprintf("%02x ", (unsigned char)f->data[i]);
@@ -284,12 +269,12 @@ static void command_touch(const char* args) {
 
 static void command_write(const char* args) {
     (void)args;
-    kprintf("Usage: write <file> <content> (Not implemented fully in this snippet)\n");
+    kprintf("Usage: write <file> <content>\n");
 }
 
 static void command_append(const char* args) {
     (void)args;
-    kprintf("Usage: append <file> <content> (Not implemented fully in this snippet)\n");
+    kprintf("Usage: append <file> <content>\n");
 }
 
 static void command_rm(const char* args) {
@@ -318,11 +303,11 @@ static void command_logs(const char* args) {
 
 static void command_snake(const char* args) {
     (void)args;
-    timer_set_callback(NULL); // Stop background animation
+    timer_set_callback(NULL);
     snake_game_run();
     background_render();
     shell_print_banner();
-    timer_set_callback(background_animate); // Restart
+    timer_set_callback(background_animate);
 }
 
 static void command_beep(const char* args) {
@@ -360,9 +345,19 @@ static void command_banner(const char* args) {
 
 static void command_gui(const char* args) {
     (void)args;
-    // Stop background animation to take full control of screen
-    timer_set_callback(NULL);
-    gui_demo_run();
+    
+    kprintf("Spawning GUI task in Ring 3...\n");
+    timer_set_callback(NULL); // Stop kernel background animation
+    
+    // Launch as a User Mode task
+    spawn_user_task(gui_demo_run);
+    
+    // Block shell execution until GUI exits
+    while (gui_is_running()) {
+        // Yield CPU to allow GUI to run
+        schedule();
+    }
+    
     // Restore shell environment
     background_render();
     shell_print_banner();
@@ -373,16 +368,11 @@ static void command_echo(const char* args) {
     kprintf("%s\n", kskip_spaces(args));
 }
 
-static void log_command_invocation(const char* command_name) {
-    (void)command_name;
-}
-
 static void execute_command(const char* input) {
     const char* trimmed = kskip_spaces(input);
     if (*trimmed == '\0') return;
     keyboard_history_record(trimmed);
 
-    // Split command name from args
     char cmd_name[32];
     size_t i = 0;
     while(trimmed[i] && trimmed[i] != ' ' && i < 31) {
@@ -395,7 +385,6 @@ static void execute_command(const char* input) {
 
     for (size_t j = 0; j < COMMAND_COUNT; j++) {
         if (kstrcmp(cmd_name, COMMANDS[j].name) == 0) {
-            log_command_invocation(COMMANDS[j].name);
             COMMANDS[j].handler(args);
             return;
         }
@@ -410,10 +399,5 @@ void shell_run(void) {
 
     for (;;) {
         shell_print_prompt();
-        // We pass NULL because the Timer now handles the idle animation!
         keyboard_read_line_ex(input, sizeof(input), NULL);
-        execute_command(input);
-    }
-}
-
-            
+        execute_
