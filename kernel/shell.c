@@ -58,15 +58,13 @@ static void command_beep(const char* args);
 static void command_disktest(const char* args);
 static void command_banner(const char* args);
 static void command_gui(const char* args);
-static void command_usermode(const char* args);
 
 static const struct shell_command COMMANDS[] = {
     {"help", command_help, "Show this help message"},
     {"about", command_about, "Learn more about " OS_NAME},
     {"clear", command_clear, "Clear the screen"},
     {"banner", command_banner, "Show moving banner screensaver"},
-    {"gui", command_gui, "Launch Windows XP-style GUI demo (Kernel Mode)"},
-    {"usermode", command_usermode, "Launch GUI in Ring 3 (User Mode)"},
+    {"gui", command_gui, "Launch Desktop Environment (User Mode)"},
     {"time", command_time, "Show current RTC date/time"},
     {"uptime", command_uptime, "Show time since boot"},  
     {"sleep", command_sleep, "Pause for N seconds"},     
@@ -361,35 +359,31 @@ static void command_banner(const char* args) {
     shell_print_banner();
 }
 
-static void command_gui(const char* args) {
-    (void)args;
-    // Stop background animation to take full control of screen
-    timer_set_callback(NULL);
-    gui_demo_run();
-    // Restore shell environment
-    background_render();
-    shell_print_banner();
-    timer_set_callback(background_animate);
-}
-
+// Wrapper function to satisfy the scheduler's task entry point signature
 static void user_gui_wrapper(void) {
-    // Running in Ring 3, but with IOPL=3, so hardware access works.
+    // Running in Ring 3 (User Mode)
     timer_set_callback(NULL);
     gui_demo_run();
-    // Since we cannot return easily to Ring 0 shell flow without syscalls, just hang
+    
+    // Since we lack proper process cleanup and syscalls for exit,
+    // we halt if the GUI returns.
     while(1) __asm__ volatile("hlt");
 }
 
-static void command_usermode(const char* args) {
+static void command_gui(const char* args) {
     (void)args;
-    kprintf("Switching to User Mode (Ring 3)...\n");
+    kprintf("Launching GUI in User Mode (Ring 3)...\n");
+    
     // Spawn the task
     spawn_user_task(user_gui_wrapper);
     
-    // Halt the kernel shell so it doesn't interfere
-    // In a real OS, the kernel would go idle or schedule other things.
-    // Here we just loop to let the scheduler run the GUI task.
-    while(1) __asm__ volatile("hlt");
+    // Halt the kernel shell to prevent it from stealing input
+    // The OS will switch to the new task on the next timer interrupt.
+    // To return to the shell, the user must currently reboot.
+    // (A 'waitpid' or 'join' would be needed for a clean return).
+    while(true) {
+        timer_wait(100);
+    }
 }
 
 static void command_echo(const char* args) {
@@ -438,5 +432,3 @@ void shell_run(void) {
         execute_command(input);
     }
 }
-
-                                                                                                                                                                                                                                                                                                                                                                                        
