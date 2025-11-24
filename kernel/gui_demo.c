@@ -1,4 +1,4 @@
-Thank you so much for#include "gui_demo.h"
+#include "gui_demo.h"
 #include "graphics.h"
 #include "keyboard.h"
 #include "mouse.h"
