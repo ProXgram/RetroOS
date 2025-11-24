@@ -27,9 +27,7 @@ DEPS := $(KERNEL_OBJS:.o=.d)
 
 QEMU ?= qemu-system-x86_64
 
-# QEMU Audio Flags: Modern QEMU (7.0+) uses -audiodev
-# We attempt to use PulseAudio ('pa') which works on Linux and WSLg.
-# If this fails, try changing 'pa' to 'sdl', 'alsa', or 'none'.
+# QEMU Audio Flags
 QEMU_AUDIO := -machine pcspk-audiodev=snd0 -audiodev pa,id=snd0
 
 .PHONY: all clean run check-conflicts
@@ -46,8 +44,6 @@ $(KERNEL_ELF): kernel/entry.asm $(KERNEL_OBJS) kernel/linker.ld | $(BUILD_DIR)
 	$(NASM) -f elf64 kernel/entry.asm -o $(BUILD_DIR)/entry.o
 	$(LD) -nostdlib -z max-page-size=0x1000 -T kernel/linker.ld -o $@ $(BUILD_DIR)/entry.o $(KERNEL_OBJS)
 
-# Make objects depend on Makefile to force rebuilds on build config changes
-# Removed recursive check-conflicts here for cleaner build output
 $(BUILD_DIR)/%.o: kernel/%.c Makefile | $(BUILD_DIR)
 	$(CC) $(CFLAGS) -c $< -o $@
 
@@ -74,7 +70,7 @@ $(OS_IMAGE): $(BOOT_BIN) $(PAYLOAD_BIN)
 	if [ $$PADDING -gt 0 ]; then \
 		dd if=/dev/zero bs=1 count=$$PADDING >> $@ 2>/dev/null; \
 	fi
-	# Pad the image with 32MB of empty space to ensure FS LBA exists
+	# Pad the image with 32MB of empty space
 	dd if=/dev/zero bs=1M count=32 >> $@ 2>/dev/null
 
 clean:
