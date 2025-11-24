@@ -1,428 +1,124 @@
-#include <stdbool.h>
-#include <stddef.h>
-#include <stdint.h>
-
-#include "background.h"
-#include "fs.h"
-#include "io.h"
-#include "keyboard.h"
-#include "kstring.h"
-#include "memtest.h"
-#include "os_info.h"
-#include "shell.h"
-#include "system.h"
-#include "syslog.h"
-#include "terminal.h"
-#include "timer.h"
-#include "snake.h"
-#include "sound.h"
-#include "kstdio.h" 
-#include "ata.h"    
-#include "banner.h"
-#include "gui_demo.h" // Includes the GUI entry point
 #include "scheduler.h"
+#include "heap.h"
+#include "syslog.h"
+#include "gdt.h"
+#include "kstdio.h"
 
-struct shell_command {
-    const char* name;
-    void (*handler)(const char* args);
-    const char* description;
-};
+static Task* g_current_task = NULL;
+static Task* g_head = NULL;
+static uint64_t g_next_pid = 1;
 
-static void shell_print_banner(void);
-static void shell_print_prompt(void);
-static void command_help(const char* args);
-static void command_about(const char* args);
-static void command_clear(const char* args);
-static void command_foreground(const char* args);
-static void command_background(const char* args);
-static void command_echo(const char* args);
-static void command_ls(const char* args);
-static void command_cat(const char* args);
-static void command_hexdump(const char* args);
-static void command_touch(const char* args);
-static void command_write(const char* args);
-static void command_append(const char* args);
-static void command_rm(const char* args);
-static void command_sysinfo(const char* args);
-static void command_logs(const char* args);
-static void command_memtest(const char* args);
-static void command_reboot(const char* args);
-static void command_shutdown(const char* args);
-static void command_time(const char* args);
-static void command_calc(const char* args);
-static void command_history(const char* args);
-static void command_uptime(const char* args);
-static void command_sleep(const char* args);
-static void command_snake(const char* args);
-static void command_beep(const char* args);
-static void command_disktest(const char* args);
-static void command_banner(const char* args);
-static void command_gui(const char* args);
+#define STACK_SIZE 16384
 
-static const struct shell_command COMMANDS[] = {
-    {"help", command_help, "Show this help message"},
-    {"about", command_about, "Learn more about " OS_NAME},
-    {"clear", command_clear, "Clear the screen"},
-    {"banner", command_banner, "Show moving banner screensaver"},
-    {"gui", command_gui, "Launch Windows XP-style GUI demo"},
-    {"time", command_time, "Show current RTC date/time"},
-    {"uptime", command_uptime, "Show time since boot"},  
-    {"sleep", command_sleep, "Pause for N seconds"},     
-    {"calc", command_calc, "Simple math (e.g. 'calc 10 + 5')"},
-    {"foreground", command_foreground, "Set text color"},
-    {"background", command_background, "Set background color"},
-    {"ls", command_ls, "List files and usage stats"},
-    {"cat", command_cat, "Print a file's text content"},
-    {"hexdump", command_hexdump, "View file content in hex"},
-    {"touch", command_touch, "Create an empty file"},
-    {"write", command_write, "Overwrite a file with new text"},
-    {"append", command_append, "Append text to a file"},
-    {"rm", command_rm, "Remove a file"},
-    {"history", command_history, "Show recent commands"},
-    {"sysinfo", command_sysinfo, "Display hardware info"},
-    {"memtest", command_memtest, "Run memory diagnostics"},
-    {"logs", command_logs, "Show system logs"},
-    {"echo", command_echo, "Display text back to you"},
-    {"snake", command_snake, "Play the Snake game"},
-    {"beep", command_beep, "Test PC Speaker"},
-    {"disktest", command_disktest, "Test ATA Read/Write"},
-    {"reboot", command_reboot, "Restart the system"},
-    {"shutdown", command_shutdown, "Power off the system"},
-};
-#define COMMAND_COUNT (sizeof(COMMANDS) / sizeof(COMMANDS[0]))
-#define INPUT_CAPACITY 128
+void scheduler_init(void) {
+    // Create a task for the currently running kernel code (Main Thread)
+    Task* kmain_task = (Task*)kmalloc(sizeof(Task));
+    kmain_task->id = g_next_pid++;
+    kmain_task->rsp = 0; // Won't be used until we switch away
+    kmain_task->is_user = false;
+    kmain_task->kernel_stack_top = 0; 
+    kmain_task->next = kmain_task; // Circular list
 
-static const char* COLOR_NAMES[16] = {
-    "Black", "Blue", "Green", "Cyan", "Red", "Magenta", "Brown", "Light Grey",
-    "Dark Grey", "Light Blue", "Light Green", "Light Cyan", "Light Red",
-    "Light Magenta", "Yellow", "White",
-};
-
-// --- Helpers ---
-#define CMOS_ADDRESS 0x70
-#define CMOS_DATA    0x71
-
-static uint8_t get_rtc_register(int reg) {
-    outb(CMOS_ADDRESS, (uint8_t)reg);
-    return inb(CMOS_DATA);
-}
-
-static void command_time(const char* args) {
-    (void)args;
-    while (get_rtc_register(0x0A) & 0x80); // Wait for update
-    // Simple RTC read (BCD conversion omitted for brevity, assumed standardized)
-    uint8_t second = get_rtc_register(0x00);
-    uint8_t minute = get_rtc_register(0x02);
-    uint8_t hour   = get_rtc_register(0x04);
+    g_head = kmain_task;
+    g_current_task = kmain_task;
     
-    // Quick BCD conversion
-    second = (second & 0x0F) + ((second / 16) * 10);
-    minute = (minute & 0x0F) + ((minute / 16) * 10);
-    hour   = ((hour & 0x0F) + ((hour / 16) * 10));
-
-    kprintf("RTC Time: %02u:%02u:%02u\n", hour, minute, second);
+    syslog_write("Scheduler: Initialized (Multitasking enabled)");
 }
 
-static void command_uptime(const char* args) {
-    (void)args;
-    uint64_t seconds = timer_get_uptime();
-    kprintf("System Uptime: %u seconds (%u ticks)\n", 
-            (unsigned int)seconds, (unsigned int)timer_get_ticks());
-}
-
-static void command_sleep(const char* args) {
-    const char* ptr = kskip_spaces(args);
-    unsigned int sec = 0;
-    if (!kparse_uint(&ptr, &sec)) {
-        kprintf("Usage: sleep <seconds>\n");
-        return;
-    }
-    kprintf("Sleeping for %u seconds...\n", sec);
-    timer_wait((int)sec * 100);
-    kprintf("Done.\n");
-}
-
-static void command_calc(const char* args) {
-    const char* cursor = kskip_spaces(args);
-    unsigned int a = 0, b = 0;
-    if (!kparse_uint(&cursor, &a)) { kprintf("Usage: calc <num> <op> <num>\n"); return; }
-    cursor = kskip_spaces(cursor);
-    char op = *cursor++;
-    cursor = kskip_spaces(cursor);
-    if (!kparse_uint(&cursor, &b)) { kprintf("Usage: calc <num> <op> <num>\n"); return; }
-
-    long result = 0;
-    if (op == '+') result = (long)a + b;
-    else if (op == '-') result = (long)a - b;
-    else if (op == '*') result = (long)a * b;
-    else if (op == '/') {
-        if (b == 0) { kprintf("Error: Div by zero\n"); return; }
-        result = (long)a / b;
-    } else { kprintf("Unknown operator\n"); return; }
+void spawn_task(void (*entry_point)(void)) {
+    Task* new_task = (Task*)kmalloc(sizeof(Task));
+    uint8_t* stack = (uint8_t*)kmalloc(STACK_SIZE);
     
-    kprintf("Result: %d\n", (int)result);
-}
-
-// ... Color parsing helpers omitted for brevity but assumed present ...
-// (Retaining your existing helpers for color/filename parsing)
-static int resolve_color_name(const char* input, const char** end_ptr) {
-    // (Existing logic)
-    int best_match = -1;
-    size_t best_len = 0;
-    for (int i = 0; i < 16; i++) {
-        const char* name = COLOR_NAMES[i];
-        size_t name_len = kstrlen(name);
-        if (kstrncmp(input, name, name_len) == 0) {
-             if (name_len > best_len) { best_match = i; best_len = name_len; }
-        }
-    }
-    if (best_match != -1) { if(end_ptr) *end_ptr = input + best_len; return best_match; }
-    return -1;
-}
-
-static bool parse_color_arg(const char** cursor, int* out_color) {
-    *cursor = kskip_spaces(*cursor);
-    const char* tmp = *cursor;
-    unsigned int val;
-    if (kparse_uint(&tmp, &val) && val < 16) { *out_color = val; *cursor = tmp; return true; }
-    int idx = resolve_color_name(*cursor, &tmp);
-    if (idx != -1) { *out_color = idx; *cursor = tmp; return true; }
-    return false;
-}
-
-static void command_foreground(const char* args) {
-    int fg; const char* c = args;
-    if (parse_color_arg(&c, &fg)) { 
-        uint8_t ofg, obg; terminal_getcolors(&ofg, &obg);
-        terminal_set_theme(fg, obg); 
-    } else kprintf("Usage: foreground <color>\n");
-}
-
-static void command_background(const char* args) {
-    int bg; const char* c = args;
-    if (parse_color_arg(&c, &bg)) { 
-        uint8_t ofg, obg; terminal_getcolors(&ofg, &obg);
-        terminal_set_theme(ofg, bg); 
-    } else kprintf("Usage: background <color>\n");
-}
-
-static void shell_print_banner(void) {
-    kprintf("%s\n%s\nType 'help' for commands.\n", OS_BANNER_LINE, OS_WELCOME_LINE);
-}
-
-static void shell_print_prompt(void) {
-    terminal_newline();
-    kprintf(OS_PROMPT_TEXT);
-}
-
-// --- COMMANDS ---
-
-static void command_help(const char* args) {
-    (void)args;
-    kprintf("Available commands:\n");
-    for (size_t i = 0; i < COMMAND_COUNT; i++) {
-        kprintf("  %s", COMMANDS[i].name);
-        size_t len = kstrlen(COMMANDS[i].name);
-        while (len++ < 12) terminal_write_char(' ');
-        kprintf("- %s\n", COMMANDS[i].description);
-    }
-}
-
-static void command_about(const char* args) {
-    (void)args;
-    kprintf("%s\n%s\n%s\n", OS_ABOUT_SUMMARY, OS_ABOUT_FOCUS, OS_ABOUT_FEATURES);
-}
-
-static void command_clear(const char* args) {
-    (void)args;
-    background_render(); // Redraw static background
-    shell_print_banner();
-}
-
-static void command_history(const char* args) {
-    (void)args;
-    size_t count = keyboard_history_length();
-    kprintf("History:\n");
-    for (size_t i = 0; i < count; i++) {
-        kprintf("%u. %s\n", (unsigned int)(i+1), keyboard_history_entry(i));
-    }
-}
-
-static void command_ls(const char* args) {
-    (void)args;
-    size_t count = fs_file_count();
-    kprintf("Files (%u):\n", count);
-    for (size_t i = 0; i < count; i++) {
-        const struct fs_file* f = fs_file_at(i);
-        if(f) kprintf("  %s (%u bytes)\n", f->name, f->size);
-    }
-}
-
-static void command_cat(const char* args) {
-    const char* name = kskip_spaces(args);
-    const struct fs_file* f = fs_find(name);
-    if (f) { terminal_writestring(f->data); terminal_newline(); }
-    else kprintf("File not found.\n");
-}
-
-static void command_hexdump(const char* args) {
-    const char* name = kskip_spaces(args);
-    const struct fs_file* f = fs_find(name);
-    if (!f) { kprintf("File not found.\n"); return; }
+    new_task->id = g_next_pid++;
+    new_task->is_user = false;
     
-    for(size_t i=0; i<f->size; i++) {
-        if(i%16==0) kprintf("\n%04x: ", i);
-        kprintf("%02x ", (unsigned char)f->data[i]);
-    }
-    terminal_newline();
-}
-
-static void command_touch(const char* args) {
-    const char* name = kskip_spaces(args);
-    if(fs_touch(name)) kprintf("Created %s\n", name);
-    else kprintf("Failed.\n");
-}
-
-static void command_write(const char* args) {
-    (void)args;
-    kprintf("Usage: write <file> <content> (Not implemented fully in this snippet)\n");
-}
-
-static void command_append(const char* args) {
-    (void)args;
-    kprintf("Usage: append <file> <content> (Not implemented fully in this snippet)\n");
-}
-
-static void command_rm(const char* args) {
-    const char* name = kskip_spaces(args);
-    if(fs_remove(name)) kprintf("Removed %s\n", name);
-    else kprintf("Failed.\n");
-}
-
-static void command_sysinfo(const char* args) {
-    (void)args;
-    const struct BootInfo* boot = system_boot_info();
-    const struct system_profile* prof = system_profile_info();
-    kprintf("Res: %ux%u | Mem: %uKB\n", boot->width, boot->height, prof->memory_total_kb);
-}
-
-static void command_memtest(const char* args) {
-    (void)args;
-    memtest_run_diagnostic();
-}
-
-static void command_logs(const char* args) {
-    (void)args;
-    size_t count = syslog_length();
-    for(size_t i=0; i<count; i++) kprintf("[%u] %s\n", i, syslog_entry(i));
-}
-
-static void command_snake(const char* args) {
-    (void)args;
-    timer_set_callback(NULL); // Stop background animation
-    snake_game_run();
-    background_render();
-    shell_print_banner();
-    timer_set_callback(background_animate); // Restart
-}
-
-static void command_beep(const char* args) {
-    (void)args;
-    sound_beep(440, 20);
-}
-
-static void command_disktest(const char* args) {
-    (void)args;
-    if(ata_init()) kprintf("ATA Init OK.\n");
-    else kprintf("ATA Init Failed.\n");
-}
-
-static void command_reboot(const char* args) {
-    (void)args;
-    outb(0x64, 0xFE);
-}
-
-static void command_shutdown(const char* args) {
-    (void)args;
-    kprintf("Shutting down...\n");
-    outw(0x604, 0x2000); 
-    outw(0xB004, 0x2000);
-    outw(0x4004, 0x3400);
-    for(;;) __asm__ volatile ("cli; hlt");
-}
-
-static void command_banner(const char* args) {
-    (void)args;
-    timer_set_callback(NULL);
-    banner_run();
-    timer_set_callback(background_animate);
-    shell_print_banner();
-}
-
-static void command_gui(const char* args) {
-    (void)args;
-    // Stop background animation
-    timer_set_callback(NULL);
+    // Set up stack for context switch
+    uint64_t* sp = (uint64_t*)(stack + STACK_SIZE);
     
-    // Run GUI in Ring 3 (User Mode)
-    // Note: gui_demo_run returns when ESC is pressed.
-    // Since we don't have process cleanup, the task exits, but we need the shell to wait.
-    spawn_user_task(gui_demo_run);
+    // 1. Return address for context_switch (RIP)
+    *(--sp) = (uint64_t)entry_point;
     
-    // Halt the shell loop while GUI runs. 
-    // Since we lack proper IPC/Wait, we loop forever.
-    // The only way to exit back to shell cleanly currently is rebooting.
-    // To improve: implement task joining.
-    while(true) {
-        timer_wait(100);
-    }
-}
-
-static void command_echo(const char* args) {
-    kprintf("%s\n", kskip_spaces(args));
-}
-
-static void log_command_invocation(const char* command_name) {
-    (void)command_name;
-}
-
-static void execute_command(const char* input) {
-    const char* trimmed = kskip_spaces(input);
-    if (*trimmed == '\0') return;
-    keyboard_history_record(trimmed);
-
-    // Split command name from args
-    char cmd_name[32];
-    size_t i = 0;
-    while(trimmed[i] && trimmed[i] != ' ' && i < 31) {
-        cmd_name[i] = trimmed[i];
-        i++;
-    }
-    cmd_name[i] = '\0';
+    // 2. Callee saved registers (rbx, rbp, r12-r15)
+    *(--sp) = 0; // R15
+    *(--sp) = 0; // R14
+    *(--sp) = 0; // R13
+    *(--sp) = 0; // R12
+    *(--sp) = 0; // RBP
+    *(--sp) = 0; // RBX
     
-    const char* args = trimmed + i;
+    new_task->rsp = (uint64_t)sp;
+    new_task->kernel_stack_top = (uint64_t)(stack + STACK_SIZE);
 
-    for (size_t j = 0; j < COMMAND_COUNT; j++) {
-        if (kstrcmp(cmd_name, COMMANDS[j].name) == 0) {
-            log_command_invocation(COMMANDS[j].name);
-            COMMANDS[j].handler(args);
-            return;
-        }
-    }
-    kprintf("Unknown command.\n");
+    // Insert into list
+    new_task->next = g_head->next;
+    g_head->next = new_task;
 }
 
-void shell_run(void) {
-    char input[INPUT_CAPACITY];
-    sound_init();
-    shell_print_banner();
+// Spawns a task that starts in Ring 3
+// Requires iretq frame construction on the kernel stack
+void spawn_user_task(void (*entry_point)(void)) {
+    Task* new_task = (Task*)kmalloc(sizeof(Task));
+    uint8_t* kstack = (uint8_t*)kmalloc(STACK_SIZE);
+    uint8_t* ustack = (uint8_t*)kmalloc(STACK_SIZE); // User stack
+    
+    new_task->id = g_next_pid++;
+    new_task->is_user = true;
+    new_task->kernel_stack_top = (uint64_t)(kstack + STACK_SIZE);
 
-    for (;;) {
-        shell_print_prompt();
-        // We pass NULL because the Timer now handles the idle animation!
-        keyboard_read_line_ex(input, sizeof(input), NULL);
-        execute_command(input);
-    }
+    uint64_t* sp = (uint64_t*)(kstack + STACK_SIZE);
+    
+    // --- Interrupt Return Frame (for iretq) ---
+    // SS (User Data Selector | RPL 3)
+    *(--sp) = 0x18 | 3; 
+    // RSP (User Stack Pointer)
+    *(--sp) = (uint64_t)(ustack + STACK_SIZE);
+    
+    // RFLAGS
+    // 0x200 = Interrupts Enabled
+    // 0x3000 = IOPL 3 (Allows Ring 3 to use IO ports/CLI/STI for RetroOS architecture)
+    // 0x002 = Reserved bit (must be 1)
+    // Total: 0x3202
+    *(--sp) = 0x3202; 
+    
+    // CS (User Code Selector | RPL 3)
+    *(--sp) = 0x20 | 3;
+    // RIP (Entry Point)
+    *(--sp) = (uint64_t)entry_point;
+    
+    // --- Context Switch Frame (for context_switch) ---
+    // This part runs in kernel mode to restore the state before iretq
+    
+    // Return address for context_switch (must point to an iretq stub)
+    extern void _iret_stub(); // Defined in entry.asm
+    *(--sp) = (uint64_t)_iret_stub;
+    
+    // Callee saved registers
+    *(--sp) = 0; // R15
+    *(--sp) = 0; // R14
+    *(--sp) = 0; // R13
+    *(--sp) = 0; // R12
+    *(--sp) = 0; // RBP
+    *(--sp) = 0; // RBX
+
+    new_task->rsp = (uint64_t)sp;
+    
+    new_task->next = g_head->next;
+    g_head->next = new_task;
 }
 
-// test
+void schedule(void) {
+    if (!g_current_task) return;
+
+    Task* next = (Task*)g_current_task->next;
+    if (next == g_current_task) return; // Only one task
+
+    Task* prev = g_current_task;
+    g_current_task = next;
+    
+    // If next task is user, ensure TSS has the correct RSP0
+    if (next->kernel_stack_top != 0) {
+        gdt_set_kernel_stack(next->kernel_stack_top);
+    }
+
+    context_switch(&prev->rsp, next->rsp);
+}
