@@ -400,4 +400,6 @@ void shell_run(void) {
     for (;;) {
         shell_print_prompt();
         keyboard_read_line_ex(input, sizeof(input), NULL);
-        execute_
+     execute_command(input);
+    }
+}
