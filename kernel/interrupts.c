@@ -35,14 +35,13 @@ struct idt_descriptor {
 
 static struct idt_entry g_idt[256];
 
-/* PIC Constants */
 #define PIC1_COMMAND 0x20
 #define PIC1_DATA    0x21
 #define PIC2_COMMAND 0xA0
 #define PIC2_DATA    0xA1
 #define PIC_EOI      0x20
 
-// External assembly handler for syscalls
+// ASM entry point for syscalls
 extern void isr_syscall(void);
 
 static void syslog_write_hex(const char* label, uint64_t value) {
@@ -76,10 +75,9 @@ static void pic_remap_and_mask(void) {
     outb(PIC2_DATA, 0x02); io_wait();
     outb(PIC1_DATA, 0x01); io_wait();
     outb(PIC2_DATA, 0x01); io_wait();
-    // Unmask Timer(0), Keyboard(1), Cascade(2) for mouse(12)
-    outb(PIC1_DATA, 0xF8); 
+    outb(PIC1_DATA, 0xFC); // Unmask Timer(0) + Kbd(1)
     outb(PIC2_DATA, 0xFF);
-    syslog_write("PIC remapped. Enabled: Timer, Kbd, Cascade");
+    syslog_write("PIC remapped (0x20/0x28).");
 }
 
 void interrupts_enable_irq(uint8_t irq) {
@@ -100,17 +98,13 @@ static const char* const EXCEPTION_NAMES[] = {
 
 static size_t panic_line = 0;
 static void panic_draw_bg(void) {
-    if (graphics_get_width() > 0) {
-        graphics_fill_rect(0, 0, graphics_get_width(), graphics_get_height(), 0xFF0000AA);
-    }
+    if (graphics_get_width() > 0) graphics_fill_rect(0, 0, graphics_get_width(), graphics_get_height(), 0xFF0000AA);
     panic_line = 0;
 }
 static void panic_write_line(const char* text) {
     if (graphics_get_width() == 0) return;
     int x = 10; int y = 10 + (panic_line * 10);
-    for (int i = 0; text[i] != '\0'; i++) {
-        graphics_draw_char(x + (i * 8), y, text[i], 0xFFFFFFFF, 0xFF0000AA);
-    }
+    for (int i = 0; text[i] != '\0'; i++) graphics_draw_char(x + (i * 8), y, text[i], 0xFFFFFFFF, 0xFF0000AA);
     panic_line++;
 }
 static void panic_write_hex_line(const char* label, uint64_t value) {
@@ -131,8 +125,8 @@ static void exception_panic(uint8_t vector, uint64_t error_code, bool has_error_
     panic_draw_bg();
     panic_write_line("!!! SYSTEM PANIC (GUI MODE) !!!");
     panic_write_vector_line(vector);
-    if (vector < sizeof(EXCEPTION_NAMES)/sizeof(char*)) { panic_write_line(EXCEPTION_NAMES[vector]); }
-    if (has_error_code) { panic_write_hex_line("Error code: ", error_code); }
+    if (vector < sizeof(EXCEPTION_NAMES)/sizeof(char*)) panic_write_line(EXCEPTION_NAMES[vector]);
+    if (has_error_code) panic_write_hex_line("Error code: ", error_code);
     if (frame != NULL) {
         panic_write_hex_line("RIP: ", frame->rip);
         panic_write_hex_line("CS: ", frame->cs);
@@ -164,15 +158,7 @@ DECLARE_NOERR_HANDLER(28); DECLARE_NOERR_HANDLER(29); DECLARE_NOERR_HANDLER(30);
 __attribute__((interrupt)) static void handler_irq_master(struct interrupt_frame* frame) { (void)frame; outb(PIC1_COMMAND, PIC_EOI); }
 __attribute__((interrupt)) static void handler_irq_slave(struct interrupt_frame* frame) { (void)frame; outb(PIC2_COMMAND, PIC_EOI); outb(PIC1_COMMAND, PIC_EOI); }
 __attribute__((interrupt)) static void handler_irq_keyboard(struct interrupt_frame* frame) { (void)frame; uint8_t scancode = inb(0x60); outb(PIC1_COMMAND, PIC_EOI); keyboard_push_byte(scancode); }
-
-// FIX: Send EOI *before* calling handler logic. 
-// If timer_handler calls schedule(), we switch tasks and never return here to send EOI, causing a hang.
-__attribute__((interrupt)) static void handler_irq_timer(struct interrupt_frame* frame) { 
-    (void)frame; 
-    outb(PIC1_COMMAND, PIC_EOI); 
-    timer_handler(); 
-}
-
+__attribute__((interrupt)) static void handler_irq_timer(struct interrupt_frame* frame) { (void)frame; timer_handler(); outb(PIC1_COMMAND, PIC_EOI); }
 __attribute__((interrupt)) static void handler_irq_mouse(struct interrupt_frame* frame) { (void)frame; mouse_handle_interrupt(); outb(PIC2_COMMAND, PIC_EOI); outb(PIC1_COMMAND, PIC_EOI); }
 
 static void idt_set_gate(uint8_t vector, void* handler) {
@@ -197,19 +183,19 @@ static void idt_set_gate_with_ist(uint8_t vector, void* handler, uint8_t ist) {
     g_idt[vector].zero = 0;
 }
 
+// DPL=3 means Ring 3 can call this interrupt
 static void idt_set_syscall_gate(uint8_t vector, void* handler) {
     uint64_t address = (uint64_t)handler;
     g_idt[vector].offset_low = (uint16_t)(address & 0xFFFF);
     g_idt[vector].selector = 0x08;
     g_idt[vector].ist = 0;
-    g_idt[vector].type_attr = 0xEE; 
+    g_idt[vector].type_attr = 0xEE; // 0xEE = Present | DPL 3 | Gate 32-bit Interrupt
     g_idt[vector].offset_mid = (uint16_t)((address >> 16) & 0xFFFF);
     g_idt[vector].offset_high = (uint32_t)((address >> 32) & 0xFFFFFFFF);
     g_idt[vector].zero = 0;
 }
 
 void interrupts_init(void) {
-    syslog_write("Trace: entering interrupts_init");
     pic_remap_and_mask();
 
     idt_set_gate(0, handler_0); idt_set_gate(1, handler_1); idt_set_gate(2, handler_2); idt_set_gate(3, handler_3);
@@ -223,17 +209,19 @@ void interrupts_init(void) {
     idt_set_gate(29, handler_29); idt_set_gate(30, handler_30); idt_set_gate(31, handler_31);
 
     for (uint8_t vector = 0x20; vector < 0x28; vector++) { idt_set_gate(vector, handler_irq_master); }
-    for (uint8_t vector = 0x28; vector < 0x30; vector++) { idt_set_gate(vector, handler_irq_slave); } //test
+    for (uint8_t vector = 0x28; vector < 0x30; vector++) { idt_set_gate(vector, handler_irq_slave); }
 
     idt_set_gate(0x20, handler_irq_timer);
     idt_set_gate(0x21, handler_irq_keyboard);
     idt_set_gate(0x2C, handler_irq_mouse);
     
+    // Enable Syscall
     idt_set_syscall_gate(0x80, isr_syscall);
 
     const struct idt_descriptor descriptor = { .limit = (uint16_t)(sizeof(g_idt) - 1), .base = (uint64_t)g_idt };
-    syslog_write_hex("IDT base: ", descriptor.base);
+    
     if (g_idt[8].selector != 0x08 || g_idt[8].ist != 1) { halt_on_invalid("Critical: IDT vector 8 misconfigured."); }
+
     __asm__ volatile("lidt %0" : : "m"(descriptor));
-    syslog_write("Trace: interrupts_init complete (Syscalls enabled)");
+    syslog_write("Interrupts initialized with Syscall (0x80) support");
 }
