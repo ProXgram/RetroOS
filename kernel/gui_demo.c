@@ -155,13 +155,6 @@ static const uint8_t CURSOR_BITMAP[19][12] = {
     {0,0,0,0,0,0,1,1,0,0,0,0}
 };
 
-// --- RTC (Stubbed for User Mode security) ---
-static void get_time_string(char* buf) {
-    // In strict Ring 3, we can't read CMOS ports directly.
-    // For now, we just hardcode a placeholder or would need a syscall.
-    str_copy(buf, "12:00");
-}
-
 // --- Helpers ---
 static bool rect_contains(int x, int y, int w, int h, int px, int py) {
     return (px >= x && px < x + w && py >= y && py < y + h);
@@ -175,6 +168,13 @@ static void int_to_str(int v, char* buf) {
     int i = 0; char tmp[16]; while (v > 0) { tmp[i++] = '0' + (v % 10); v /= 10; }
     if (neg) tmp[i++] = '-';
     int j = 0; while (i > 0) buf[j++] = tmp[--i]; buf[j] = 0;
+}
+
+// --- RTC (Stubbed for User Mode security) ---
+static void get_time_string(char* buf) {
+    // In strict Ring 3, we can't read CMOS ports directly.
+    // For now, we just hardcode a placeholder or would need a syscall.
+    str_copy(buf, "12:00");
 }
 
 // --- Window Management ---
@@ -562,7 +562,8 @@ static void handle_terminal_input(Window* w, char c) {
     } else if (c == '\b') {
         if (ts->input_len > 0) ts->input[--ts->input_len] = 0;
     } else if (c >= 32 && c <= 126 && ts->input_len < 60) {
-        ts->input[ts->input_len++] = c; ts->input[ts->input_len] = 0;
+        ts->input[ts->input_len++] = c;
+        ts->input[ts->input_len] = 0;
     }
 }
 
