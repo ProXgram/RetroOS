@@ -202,8 +202,8 @@ static void create_window(AppType type, const char* title, int w, int h) {
         win->state.term.input[0] = 0;
         win->state.term.input_len = 0;
         for(int k=0; k<5; k++) win->state.term.history[k][0] = 0;
-        str_copy(win->state.term.history[0], "Nostalux Shell v1.0");
-        str_copy(win->state.term.history[1], "Type 'help' for cmds");
+        str_copy(win->state.term.history[0], "Nostalux GUI Shell");
+        str_copy(win->state.term.history[1], "Type 'help' or 'ls'");
     }
     
     windows[slot] = win; focus_window(slot);
@@ -385,8 +385,12 @@ static void render_cursor(void) {
 static void render_desktop(void) {
     draw_gradient_rect(0, 0, screen_w, screen_h - TASKBAR_H, desktop_col_top, desktop_col_bot);
     
-    // "Click to capture" hint
-    graphics_draw_string_scaled(screen_w - 220, 10, "Click screen to capture mouse", 0x80FFFFFF, 0, 1);
+    // Visual hint to capture mouse
+    // Making it blink slightly to attract attention
+    static int blink = 0;
+    blink++;
+    uint32_t hint_col = (blink % 20 < 10) ? COL_RED : 0x80FFFFFF;
+    graphics_draw_string_scaled(screen_w - 240, 10, "CLICK SCREEN TO CAPTURE MOUSE", hint_col, 0, 1);
 
     struct { int x, y; const char* lbl; } icons[] = {
         {20, 20, "Terminal"}, {20, 80, "My Files"}, {20, 140, "Notepad"}, {20, 200, "Calc"}
@@ -569,21 +573,52 @@ static void handle_calc_logic(Window* w, char key) {
 static void handle_terminal_input(Window* w, char c) {
     TerminalState* ts = &w->state.term;
     if (c == '\n') {
-        // Scroll history
+        // Shift history
         for (int i=0; i<4; i++) str_copy(ts->history[i], ts->history[i+1]);
-        str_copy(ts->history[4], ts->input);
         
-        // Execute simple commands
-        if (kstrcmp(ts->input, "exit") == 0) { close_window(w->id); return; }
-        else if (kstrcmp(ts->input, "cls") == 0) {
+        // Echo command
+        char cmd_line[32];
+        str_copy(cmd_line, "> ");
+        int j = 2;
+        for(int k=0; k<ts->input_len && j<30; k++) cmd_line[j++] = ts->input[k];
+        cmd_line[j] = 0;
+        str_copy(ts->history[4], cmd_line);
+
+        // Parse command
+        if (kstrcmp(ts->input, "exit") == 0) { 
+            close_window(w->id); 
+            return; 
+        }
+        else if (kstrcmp(ts->input, "cls") == 0 || kstrcmp(ts->input, "clear") == 0) {
             for(int i=0; i<5; i++) ts->history[i][0] = 0;
         }
         else if (kstrcmp(ts->input, "help") == 0) {
-            for (int i=0; i<4; i++) str_copy(ts->history[i], ts->history[i+1]);
-            str_copy(ts->history[4], "cmds: help, cls, exit");
+            for(int i=0; i<4; i++) str_copy(ts->history[i], ts->history[i+1]);
+            str_copy(ts->history[4], "Cmds: help, ls, echo, clear, about, exit");
+        }
+        else if (kstrcmp(ts->input, "ls") == 0) {
+            size_t count = fs_file_count();
+            char buf[32];
+            for(int i=0; i<4; i++) str_copy(ts->history[i], ts->history[i+1]);
+            if (count == 0) str_copy(ts->history[4], "No files found.");
+            else {
+                // Just show the first file for brevity in this mini-terminal
+                const struct fs_file* f = fs_file_at(0);
+                str_copy(buf, "File: ");
+                int b=6; int n=0; while(f->name[n] && b<30) buf[b++] = f->name[n++]; buf[b]=0;
+                str_copy(ts->history[4], buf);
+            }
+        }
+        else if (kstrncmp(ts->input, "echo ", 5) == 0) {
+            for(int i=0; i<4; i++) str_copy(ts->history[i], ts->history[i+1]);
+            str_copy(ts->history[4], ts->input + 5);
+        }
+        else if (kstrcmp(ts->input, "about") == 0) {
+            for(int i=0; i<4; i++) str_copy(ts->history[i], ts->history[i+1]);
+            str_copy(ts->history[4], "NostaluxOS v1.0 (GUI Shell)");
         }
         else if (ts->input_len > 0) {
-            for (int i=0; i<4; i++) str_copy(ts->history[i], ts->history[i+1]);
+            for(int i=0; i<4; i++) str_copy(ts->history[i], ts->history[i+1]);
             str_copy(ts->history[4], "Unknown command.");
         }
         
