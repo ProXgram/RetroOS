@@ -78,20 +78,14 @@ void mouse_init(void) {
 
 void mouse_handle_interrupt(void) {
     uint8_t status = inb(MOUSE_PORT_STATUS);
-    
-    // Relaxed check: just ensure data is available.
-    // While bit 5 (0x20) indicates AUX, on some setups or if read too late
-    // it might be cleared. Since we are in the mouse IRQ handler,
-    // if there is data (bit 0), it's likely for us.
-    if (!(status & 0x01)) return;
+    uint8_t b = inb(MOUSE_PORT_DATA); // Always read to clear interrupt
 
-    uint8_t b = inb(MOUSE_PORT_DATA);
+    // Check if interrupt came from mouse (Bit 5 of status)
+    if (!(status & 0x20)) return; 
 
     switch(g_mouse_cycle) {
         case 0:
-            // Bit 3 should be 1 for a standard packet.
-            // We check this to sync up.
-            if ((b & 0x08) == 0x08) { 
+            if ((b & 0x08) == 0x08) { // Align bit must be 1
                 g_mouse_byte[0] = b;
                 g_mouse_cycle++;
             }
