@@ -83,6 +83,7 @@ typedef struct {
 // --- State ---
 // Array of pointers to windows.
 // Windows are allocated on the heap via kmalloc.
+// Initialized to NULL by BSS section automatically.
 static Window* windows[MAX_WINDOWS];
 
 static bool start_menu_open = false;
