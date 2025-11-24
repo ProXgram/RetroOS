@@ -78,14 +78,26 @@ void mouse_init(void) {
 
 void mouse_handle_interrupt(void) {
     uint8_t status = inb(MOUSE_PORT_STATUS);
-    // Check if interrupt came from mouse
-    if (!(status & 0x20)) return; 
+    
+    // Robustness Check:
+    // If the status bit for AUX (mouse) is not set, it might be valid data
+    // if we are certain this IRQ fired for mouse. 
+    // However, if we blindly read 0x60 when it's empty, we might read garbage.
+    // But if we don't read when IRQ fires, we hang.
+    // We will only read if data is available (Bit 0).
+    if (!(status & 0x01)) return;
 
+    // If bit 5 (0x20) is NOT set, this data technically belongs to the keyboard.
+    // But since IRQ1 handles keyboard, we ideally shouldn't be here.
+    // We will process it anyway if cycle > 0 to prevent getting stuck.
+    
     uint8_t b = inb(MOUSE_PORT_DATA);
 
     switch(g_mouse_cycle) {
         case 0:
-            if ((b & 0x08) == 0x08) { // Align bit must be 1
+            // Bit 3 should be 1 for a standard packet.
+            // We check this to sync up.
+            if ((b & 0x08) == 0x08) { 
                 g_mouse_byte[0] = b;
                 g_mouse_cycle++;
             }
