@@ -44,29 +44,12 @@ static void boot_sequence(const struct BootInfo* boot_info) {
     fs_init();
 }
 
-// Wrapper to launch GUI demo as a task
-void gui_task_entry(void) {
-    // Disable background animation on the main thread so GUI can own screen
-    timer_set_callback(NULL);
-    gui_demo_run();
-    // When GUI exits, it returns here. We spin or kill task.
-    while(1) __asm__ volatile("hlt");
-}
-
 void kmain(const struct BootInfo* boot_info) {
     boot_sequence(boot_info);
 
-    // Demonstrate Multitasking:
-    // Spawn the GUI Demo in a separate thread.
-    // The main thread will continue to run the Shell.
-    // Note: Both fighting for screen is chaotic, but proves scheduler works.
-    // For a cleaner demo, we usually suspend shell, but here we run side-by-side.
-    
-    kprintf("Spawning GUI Task...\n");
-    spawn_task(gui_task_entry);
-
-    // Ring 3 Test Task (Infinite Loop)
-    // spawn_user_task(some_user_function); 
+    // NOTE: We do NOT spawn the GUI task automatically anymore.
+    // This prevents the GUI from stealing keyboard input from the shell.
+    // The user can type 'gui' in the shell to launch the desktop.
 
     shell_run();
 }
