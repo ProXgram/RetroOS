@@ -10,7 +10,7 @@
 #include "system.h"
 #include "heap.h"
 #include <stdbool.h>
-//t
+
 // --- SYSCALL WRAPPERS ---
 
 static void syscall_yield(void) {
@@ -150,6 +150,37 @@ static const uint8_t CURSOR_BITMAP[19][12] = {
     {0,0,0,0,0,0,1,1,0,0,0,0}
 };
 
+// Trash Bin Icon Bitmap (24x26)
+// 0: Trans, 1: Black, 2: Blue, 3: DarkBlue, 4: White, 5: Grey
+static const uint8_t TRASH_BITMAP[26][24] = {
+    {0,0,0,0,0,0,0,1,1,1,1,1,0,0,0,0,0,0,0,0,0,0,0,0},
+    {0,0,0,0,0,1,1,4,4,5,4,4,1,1,0,0,0,0,0,0,0,0,0,0},
+    {0,0,0,0,1,4,4,5,5,5,4,5,4,4,1,0,0,0,0,0,0,0,0,0},
+    {0,0,0,1,4,5,5,4,4,5,5,4,5,5,4,1,0,0,0,0,0,0,0,0}, 
+    {0,0,1,1,1,1,1,1,1,1,1,1,1,1,1,1,1,0,0,0,0,0,0,0}, 
+    {0,1,2,2,2,2,2,2,2,2,2,2,2,2,2,2,2,1,0,0,0,0,0,0}, 
+    {0,1,3,3,3,3,3,3,3,3,3,3,3,3,3,3,3,1,0,0,0,0,0,0}, 
+    {0,0,1,2,2,2,2,2,2,2,2,2,2,2,2,2,1,0,0,0,0,0,0,0}, 
+    {0,0,1,3,2,2,2,2,2,2,2,2,2,2,2,3,1,0,0,0,0,0,0,0},
+    {0,0,1,3,2,2,2,2,4,4,2,2,2,2,2,3,1,0,0,0,0,0,0,0}, 
+    {0,0,1,3,2,2,2,4,2,2,4,2,2,2,2,3,1,0,0,0,0,0,0,0},
+    {0,0,1,3,2,2,2,2,2,4,2,2,2,2,2,3,1,0,0,0,0,0,0,0},
+    {0,0,1,3,2,2,2,2,4,2,4,2,2,2,2,3,1,0,0,0,0,0,0,0},
+    {0,0,1,3,2,2,2,4,4,4,4,4,2,2,2,3,1,0,0,0,0,0,0,0},
+    {0,0,1,3,2,2,2,2,2,4,2,2,2,2,2,3,1,0,0,0,0,0,0,0},
+    {0,0,1,3,2,2,2,2,4,2,4,2,2,2,2,3,1,0,0,0,0,0,0,0},
+    {0,0,1,3,2,2,2,4,2,2,2,4,2,2,2,3,1,0,0,0,0,0,0,0},
+    {0,0,1,3,2,2,2,2,2,2,2,2,2,2,2,3,1,0,0,0,0,0,0,0},
+    {0,0,1,3,2,2,2,2,2,2,2,2,2,2,2,3,1,0,0,0,0,0,0,0},
+    {0,0,1,3,2,2,2,2,2,2,2,2,2,2,2,3,1,0,0,0,0,0,0,0},
+    {0,0,1,3,2,2,2,2,2,2,2,2,2,2,2,3,1,0,0,0,0,0,0,0},
+    {0,0,1,3,2,2,2,2,2,2,2,2,2,2,2,3,1,0,0,0,0,0,0,0},
+    {0,0,0,1,3,2,2,2,2,2,2,2,2,2,3,1,0,0,0,0,0,0,0,0},
+    {0,0,0,1,3,3,3,3,3,3,3,3,3,3,3,1,0,0,0,0,0,0,0,0},
+    {0,0,0,0,1,1,1,1,1,1,1,1,1,1,1,0,0,0,0,0,0,0,0,0},
+    {0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0}
+};
+
 // --- Helpers ---
 
 static bool rect_contains(int x, int y, int w, int h, int px, int py) {
@@ -187,11 +218,13 @@ static void close_window(int index) {
     if (index < 0 || index >= MAX_WINDOWS || windows[index] == NULL) return;
     syscall_free(windows[index]); 
     windows[index] = NULL;
+    
     // Shift windows down to fill gap
     for (int i = index; i < MAX_WINDOWS - 1; i++) {
         windows[i] = windows[i+1];
         if (windows[i]) windows[i]->id = i; 
     }
+    // IMPORTANT: Clear the last slot to prevent duplication
     windows[MAX_WINDOWS - 1] = NULL;
 }
 
@@ -199,27 +232,22 @@ static int focus_window(int index) {
     if (index < 0 || index >= MAX_WINDOWS || windows[index] == NULL) return -1;
     Window* target = windows[index];
     
-    // Shift entire array down from 'index' to the end to remove the gap
+    // Shift everything from index+1 down to index
     for (int i = index; i < MAX_WINDOWS - 1; i++) {
         windows[i] = windows[i+1];
         if (windows[i]) windows[i]->id = i;
     }
-    // Clear the last slot (avoid duplication bug)
+    // Clear last slot to avoid duplication
     windows[MAX_WINDOWS - 1] = NULL;
     
-    // Find the new first empty slot at the end
+    // Find the first empty slot (which should be at the end now)
     int top_slot = 0;
     while (top_slot < MAX_WINDOWS && windows[top_slot] != NULL) top_slot++;
     
-    // Place target at the top (end of active list)
-    if (top_slot < MAX_WINDOWS) {
-        windows[top_slot] = target;
-        target->id = top_slot;
-    } else {
-        // Fallback (shouldn't happen if logic is sound)
-        windows[MAX_WINDOWS - 1] = target;
-        target->id = MAX_WINDOWS - 1;
-    }
+    if (top_slot >= MAX_WINDOWS) top_slot = MAX_WINDOWS - 1;
+
+    windows[top_slot] = target; 
+    target->id = top_slot;
 
     // Update flags
     for(int j=0; j<MAX_WINDOWS; j++) {
@@ -247,9 +275,9 @@ static void create_window(AppType type, const char* title, int w, int h) {
     if (slot == -1) { 
         // Array full, close oldest
         close_window(0); 
-        slot = MAX_WINDOWS - 1;
-        while(windows[slot] != NULL && slot > 0) slot--;
-        if(windows[slot] != NULL) return;
+        // After close, slot is guaranteed
+        slot = MAX_WINDOWS - 1; 
+        while(slot > 0 && windows[slot] != NULL) slot--;
     }
 
     Window* win = (Window*)syscall_malloc(sizeof(Window));
@@ -391,7 +419,6 @@ static void handle_calc_logic(Window* w, char key) {
     const char* btns = "789/456*123-C0=+";
     
     for(int b=0; b<16; b++) {
-        // FIX: Added +10 to bx calculation to match render_calc offsets
         int bx = cx + 10 + (b%4)*40; 
         int by = cy + (b/4)*35;
         if (rect_contains(bx, by, 35, 30, mouse.x, mouse.y)) {
@@ -479,6 +506,14 @@ static void draw_bevel_rect(int x, int y, int w, int h, uint32_t fill, bool sunk
     graphics_fill_rect(x+w-1, y, 1, h, br);  
 }
 
+// Helper to draw outlined rectangle for Maximize icon
+static void draw_rect_outline(int x, int y, int w, int h, uint32_t color) {
+    graphics_fill_rect(x, y, w, 1, color);         // Top
+    graphics_fill_rect(x, y + h - 1, w, 1, color); // Bottom
+    graphics_fill_rect(x, y, 1, h, color);         // Left
+    graphics_fill_rect(x + w - 1, y, 1, h, color); // Right
+}
+
 // Draws pixel-perfect icons for window controls
 static void draw_icon(int x, int y, int type, uint32_t color) {
     // x,y is top-left of the icon 10x10 area
@@ -490,19 +525,10 @@ static void draw_icon(int x, int y, int type, uint32_t color) {
             graphics_put_pixel(x+8-i, y+1+i+1, color); 
         }
     } else if (type == 1) { // Maximize (Box)
-        graphics_fill_rect(x+1, y+1, 9, 2, color); // Top
-        graphics_fill_rect(x+1, y+8, 9, 2, color); // Bottom
-        graphics_fill_rect(x+1, y+1, 2, 9, color); // Left
-        graphics_fill_rect(x+8, y+1, 2, 9, color); // Right
+        draw_rect_outline(x+1, y+1, 9, 9, color);
     } else if (type == 2) { // Restore (Two Boxes)
-        // Back box
-        graphics_fill_rect(x+3, y, 6, 2, color); 
-        graphics_fill_rect(x+7, y, 2, 6, color);
-        // Front box
-        graphics_fill_rect(x, y+3, 7, 2, color); // Top
-        graphics_fill_rect(x, y+8, 7, 2, color); // Bottom
-        graphics_fill_rect(x, y+3, 2, 7, color); // Left
-        graphics_fill_rect(x+5, y+3, 2, 7, color); // Right
+        draw_rect_outline(x+3, y, 6, 6, color); 
+        draw_rect_outline(x, y+3, 7, 7, color);
     } else if (type == 3) { // Minimize (_)
         graphics_fill_rect(x+1, y+7, 8, 3, color);
     }
@@ -629,19 +655,19 @@ static void render_window(Window* w) {
     graphics_draw_string_scaled(w->x+8, w->y+8, w->title, COL_WHITE, 0, 1);
     
     // Controls
-    int bx = w->x+w->w-25;
+    int bx = w->x + w->w - 25;
     bool hc = rect_contains(bx, w->y+5, 20, 18, mouse.x, mouse.y);
     draw_bevel_rect(bx, w->y+5, 20, 18, hc?COL_RED_HOVER:COL_RED, false);
     // Draw Close Icon
     draw_icon(bx+5, w->y+9, 0, COL_WHITE);
     
-    int mx = bx-22; 
+    int mx = bx - 22; 
     bool hm = rect_contains(mx, w->y+5, 20, 18, mouse.x, mouse.y);
     draw_bevel_rect(mx, w->y+5, 20, 18, hm?COL_BTN_HOVER:0xFFDDDDDD, false);
     // Draw Max/Restore Icon
     draw_icon(mx+5, w->y+9, w->maximized ? 2 : 1, COL_BLACK);
     
-    int mn = mx-22; 
+    int mn = mx - 22; 
     bool hmn = rect_contains(mn, w->y+5, 20, 18, mouse.x, mouse.y);
     draw_bevel_rect(mn, w->y+5, 20, 18, hmn?COL_BTN_HOVER:0xFFDDDDDD, false);
     // Draw Minimize Icon
@@ -668,17 +694,45 @@ static void render_desktop(void) {
         {20, 20, "Terminal"}, 
         {20, 80, "My Files"}, 
         {20, 140, "Notepad"}, 
-        {20, 200, "Calc"} 
+        {20, 200, "Calc"},
+        {20, 260, "Trash"}  // Added Trash Bin at index 4
     };
     
-    for (int i=0; i<4; i++) {
+    for (int i=0; i<5; i++) {
         bool h = rect_contains(icons[i].x, icons[i].y, 64, 55, mouse.x, mouse.y);
         if (h) graphics_fill_rect(icons[i].x, icons[i].y, 64, 55, 0x40FFFFFF);
         
-        // Icon graphic (generic box)
-        graphics_fill_rect(icons[i].x+16, icons[i].y+5, 32, 28, (i==0)?0xFF000000:(i==1?0xFFDDAA00:0xFFEEEEEE));
+        if (i == 4) {
+            // Draw Trash Bin Bitmap (Index 4)
+            // Centered in 64x55 box. 24x26 bitmap.
+            // x_start = icons[i].x + (64-24)/2 = +20
+            // y_start = icons[i].y + 5
+            int tx = icons[i].x + 20;
+            int ty = icons[i].y + 5;
+            
+            for(int py=0; py<26; py++) {
+                for(int px=0; px<24; px++) {
+                    uint8_t c = TRASH_BITMAP[py][px];
+                    if(c != 0) {
+                        uint32_t col = 0;
+                        if (c == 1) col = 0xFF000000; // Black
+                        else if (c == 2) col = 0xFF4070D0; // Blue
+                        else if (c == 3) col = 0xFF203870; // Dark Blue
+                        else if (c == 4) col = 0xFFFFFFFF; // White
+                        else if (c == 5) col = 0xFFC0C0C0; // Grey
+                        
+                        // Draw 2x scale for visibility? Or 1x? 24px is small. 
+                        // Let's stick to 1x scaling to match design.
+                        graphics_put_pixel(tx+px, ty+py, col);
+                    }
+                }
+            }
+        } else {
+            // Icon graphic (generic box for others)
+            graphics_fill_rect(icons[i].x+16, icons[i].y+5, 32, 28, (i==0)?0xFF000000:(i==1?0xFFDDAA00:0xFFEEEEEE));
+            if (i==0) graphics_draw_string_scaled(icons[i].x+18, icons[i].y+8, ">_", COL_GREEN, COL_BLACK, 1);
+        }
         
-        if (i==0) graphics_draw_string_scaled(icons[i].x+18, icons[i].y+8, ">_", COL_GREEN, COL_BLACK, 1);
         graphics_draw_string_scaled(icons[i].x+5, icons[i].y+40, icons[i].lbl, COL_WHITE, 0, 1);
     }
     
@@ -802,12 +856,15 @@ static void on_click(int x, int y) {
                 int idx = focus_window(i); 
                 w = windows[idx];
                 
-                int by = w->y+5, cx = w->x+w->w-25;
+                int by = w->y+5; 
+                int bx = w->x + w->w - 25; // Close X start
+                int mx = bx - 22;          // Max start
+                int mn = mx - 22;          // Min start
                 
-                // Title Bar Buttons
-                if (rect_contains(cx, by, 20, 18, x, y)) { close_window(idx); return; }
-                if (rect_contains(cx-22, by, 20, 18, x, y)) { toggle_maximize(w); return; }
-                if (rect_contains(cx-44, by, 20, 18, x, y)) { w->minimized = true; return; }
+                // Title Bar Buttons (Hitbox 20x18)
+                if (rect_contains(bx, by, 20, 18, x, y)) { close_window(idx); return; }
+                if (rect_contains(mx, by, 20, 18, x, y)) { toggle_maximize(w); return; }
+                if (rect_contains(mn, by, 20, 18, x, y)) { w->minimized = true; return; }
                 
                 // Dragging
                 if (y < w->y + WIN_CAPTION_H && !w->maximized) { 
@@ -831,6 +888,7 @@ static void on_click(int x, int y) {
     else if (rect_contains(20, 80, 64, 55, x, y)) create_window(APP_FILES, "File Explorer", 400, 300);
     else if (rect_contains(20, 140, 64, 55, x, y)) create_window(APP_NOTEPAD, "Notepad", 300, 200);
     else if (rect_contains(20, 200, 64, 55, x, y)) create_window(APP_CALC, "Calc", 220, 300);
+    else if (rect_contains(20, 260, 64, 55, x, y)) create_window(APP_FILES, "Trash Bin", 400, 300);
 }
 
 void gui_demo_run(void) {
