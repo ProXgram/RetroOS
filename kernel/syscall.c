@@ -4,36 +4,35 @@
 #include "syslog.h"
 #include "io.h"
 #include "mouse.h"
+#include "heap.h"
 
-// Definition of the register state pushed by isr_syscall in entry.asm
 struct syscall_regs {
     uint64_t rbx, rcx, rdx, rsi, rdi, r8, r9, r10, r11, r12, r13, r14, r15, rbp;
-    // Pushed by CPU on interrupt + error code/rip
     uint64_t rip, cs, rflags, rsp, ss; 
 };
 
-// --- Syscall Implementations ---
+#define CMOS_ADDRESS 0x70
+#define CMOS_DATA    0x71
 
-static void sys_yield(void) {
-    schedule();
+static uint8_t get_rtc_register(int reg) {
+    outb(CMOS_ADDRESS, (uint8_t)reg);
+    return inb(CMOS_DATA);
 }
+
+static void sys_yield(void) { schedule(); }
 
 static void sys_exit(void) {
-    kprintf("Task exited via syscall.\n");
-    // Loop forever (scheduler will switch away)
-    while(1) { schedule(); } 
+    syslog_write("Syscall: Task exited");
+    exit_current_task();
 }
 
-static void sys_log(const char* msg) {
-    // In a real OS, check pointer validity here!
-    syslog_write(msg);
-}
+static void sys_log(const char* msg) { syslog_write(msg); }
 
 static void sys_shutdown(void) {
-    syslog_write("Syscall: Shutdown requested");
-    outw(0x604, 0x2000); // QEMU
-    outw(0xB004, 0x2000); // Bochs
-    outw(0x4004, 0x3400); // VirtualBox
+    syslog_write("Syscall: Shutdown");
+    outw(0x604, 0x2000); 
+    outw(0xB004, 0x2000);
+    outw(0x4004, 0x3400);
 }
 
 static void sys_get_mouse(MouseState* user_struct) {
@@ -43,32 +42,35 @@ static void sys_get_mouse(MouseState* user_struct) {
     }
 }
 
-// --- Dispatcher ---
+static void* sys_malloc(size_t size) { return kmalloc(size); }
+static void sys_free(void* ptr) { kfree(ptr); }
 
-void syscall_dispatcher(struct syscall_regs* regs) {
-    // Syscall number passed in RDI (First arg in System V ABI)
+static void sys_get_time(char* buffer) {
+    while (get_rtc_register(0x0A) & 0x80); 
+    uint8_t m = get_rtc_register(0x02);
+    uint8_t h = get_rtc_register(0x04);
+    m = (m & 0x0F) + ((m / 16) * 10);
+    h = ((h & 0x0F) + ((h / 16) * 10));
+    buffer[0] = '0' + (h / 10); buffer[1] = '0' + (h % 10);
+    buffer[2] = ':';
+    buffer[3] = '0' + (m / 10); buffer[4] = '0' + (m % 10);
+    buffer[5] = 0;
+}
+
+// Returns value to be placed in RAX
+uint64_t syscall_dispatcher(struct syscall_regs* regs) {
     uint64_t syscall_num = regs->rdi; 
+    uint64_t ret = 0;
 
     switch (syscall_num) {
-        case 0: // Yield
-            sys_yield();
-            break;
-        case 1: // Exit
-            sys_exit();
-            break;
-        case 2: // Log
-            // Msg pointer in RSI
-            sys_log((const char*)regs->rsi);
-            break;
-        case 4: // Shutdown
-            sys_shutdown();
-            break;
-        case 5: // Get Mouse
-            // Pointer in RSI
-            sys_get_mouse((MouseState*)regs->rsi);
-            break;
-        default:
-            // Unknown syscall
-            break;
+        case 0: sys_yield(); break;
+        case 1: sys_exit(); break;
+        case 2: sys_log((const char*)regs->rsi); break;
+        case 4: sys_shutdown(); break;
+        case 5: sys_get_mouse((MouseState*)regs->rsi); break;
+        case 6: ret = (uint64_t)sys_malloc((size_t)regs->rsi); break;
+        case 7: sys_free((void*)regs->rsi); break;
+        case 8: sys_get_time((char*)regs->rsi); break;
     }
+    return ret;
 }
