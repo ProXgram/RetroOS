@@ -58,9 +58,16 @@ static void pic_remap_and_mask(void) {
     outb(PIC2_DATA, 0x02); io_wait();
     outb(PIC1_DATA, 0x01); io_wait();
     outb(PIC2_DATA, 0x01); io_wait();
-    outb(PIC1_DATA, 0xFC); // Unmask Timer(0) + Kbd(1)
-    outb(PIC2_DATA, 0xFF);
-    syslog_write("PIC remapped (0x20/0x28).");
+    
+    // Mask all interrupts initially except:
+    // Bit 0: Timer (IRQ0)
+    // Bit 1: Keyboard (IRQ1)
+    // Bit 2: Cascade (IRQ2) - REQUIRED for Slave PIC (Mouse) to work
+    // 1111 1000 = 0xF8
+    outb(PIC1_DATA, 0xF8); 
+    outb(PIC2_DATA, 0xFF); // Mask all slave interrupts (Mouse unmasked later)
+    
+    syslog_write("PIC remapped (0x20/0x28) with Cascade enabled.");
 }
 
 void interrupts_enable_irq(uint8_t irq) {
