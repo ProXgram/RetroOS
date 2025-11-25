@@ -118,3 +118,6 @@ isr_syscall:
     pop rbp
     
     iretq
+
+; Fixes the linker warning about executable stack
+section .note.GNU-stack noalloc noexec nowrite progbits
