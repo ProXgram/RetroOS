@@ -2,7 +2,6 @@
 #include "kstdio.h"
 #include "scheduler.h"
 #include "syslog.h"
-#include "ata.h"
 #include "io.h"
 #include "mouse.h"
 
@@ -20,26 +19,24 @@ static void sys_yield(void) {
 }
 
 static void sys_exit(void) {
-    kprintf("Process requested exit.\n");
-    // In a real OS, we would mark task as dead. 
-    // Here we just yield forever until the shell kills us or we reboot.
+    kprintf("Task exited via syscall.\n");
+    // Loop forever (scheduler will switch away)
     while(1) { schedule(); } 
 }
 
 static void sys_log(const char* msg) {
-    // Security TODO: In a real OS, validate 'msg' pointer is in user range!
+    // In a real OS, check pointer validity here!
     syslog_write(msg);
 }
 
 static void sys_shutdown(void) {
     syslog_write("Syscall: Shutdown requested");
-    outw(0x604, 0x2000); // QEMU Shutdown
-    outw(0xB004, 0x2000); // Bochs Shutdown
-    outw(0x4004, 0x3400); // VirtualBox Shutdown
+    outw(0x604, 0x2000); // QEMU
+    outw(0xB004, 0x2000); // Bochs
+    outw(0x4004, 0x3400); // VirtualBox
 }
 
 static void sys_get_mouse(MouseState* user_struct) {
-    // Security TODO: Validate pointer!
     if (user_struct) {
         MouseState k_state = mouse_get_state();
         *user_struct = k_state;
@@ -49,7 +46,7 @@ static void sys_get_mouse(MouseState* user_struct) {
 // --- Dispatcher ---
 
 void syscall_dispatcher(struct syscall_regs* regs) {
-    // Syscall number passed in RDI (Argument 1 in System V ABI)
+    // Syscall number passed in RDI (First arg in System V ABI)
     uint64_t syscall_num = regs->rdi; 
 
     switch (syscall_num) {
@@ -60,19 +57,18 @@ void syscall_dispatcher(struct syscall_regs* regs) {
             sys_exit();
             break;
         case 2: // Log
+            // Msg pointer in RSI
             sys_log((const char*)regs->rsi);
-            break;
-        case 3: // Reserved (Disk)
             break;
         case 4: // Shutdown
             sys_shutdown();
             break;
-        case 5: // Get Mouse State
-            // RSI contains the pointer to the User struct
+        case 5: // Get Mouse
+            // Pointer in RSI
             sys_get_mouse((MouseState*)regs->rsi);
             break;
         default:
-            kprintf("Unknown Syscall: %d\n", (int)syscall_num);
+            // Unknown syscall
             break;
     }
 }
