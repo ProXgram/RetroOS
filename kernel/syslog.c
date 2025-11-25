@@ -2,6 +2,7 @@
 
 #include <stddef.h>
 #include <stdint.h>
+#include <stdbool.h>
 #include "io.h"
 
 #define SYSLOG_CAPACITY 64
