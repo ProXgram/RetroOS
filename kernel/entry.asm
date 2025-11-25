@@ -99,6 +99,7 @@ isr_syscall:
     mov rdi, rsp 
     
     ; 3. Call Kernel Dispatcher
+    ; uint64_t syscall_dispatcher(struct syscall_regs* regs)
     call syscall_dispatcher
     
     ; 4. Restore User State
@@ -117,7 +118,8 @@ isr_syscall:
     pop r15
     pop rbp
     
+    ; RAX contains return value from syscall_dispatcher
+    
     iretq
 
-; Fixes the linker warning about executable stack
 section .note.GNU-stack noalloc noexec nowrite progbits
