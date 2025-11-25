@@ -15,17 +15,23 @@ static void print_uint(unsigned long long value, int base, bool pad_pointer) {
     // Handle 0 explicitly
     if (value == 0) {
         if (pad_pointer) {
-            // For %p NULL, often nice to print (nil) or 0x00...00,
-            // but strictly we just print 0 or 0x0. 
-            // Let's behave like %x for 0, but ensure pointer padding logic if requested.
+            // Print full pointer width (16 hex digits for 64-bit)
+            for (int i = 0; i < 16; i++) terminal_write_char('0');
+        } else {
+            terminal_write_char('0');
         }
-        terminal_write_char('0');
         return;
     }
 
     while (value > 0) {
         buffer[pos++] = digits[value % base];
         value /= base;
+    }
+
+    // Pointer padding (leading zeros)
+    if (pad_pointer) {
+        int padding = 16 - pos;
+        while (padding-- > 0) terminal_write_char('0');
     }
 
     // Print in reverse
@@ -79,8 +85,6 @@ void kvprintf(const char* format, va_list args) {
                 break;
             }
             case 'x': {
-                // We'll accept standard int/unsigned for %x, 
-                // but handle larger types if standard promotion applies.
                 unsigned long long x = va_arg(args, unsigned int);
                 terminal_writestring("0x");
                 print_uint(x, 16, false);
@@ -97,7 +101,6 @@ void kvprintf(const char* format, va_list args) {
                 break;
             }
             default: {
-                // Unknown format specifier, print it literally
                 terminal_write_char('%');
                 terminal_write_char(*format);
                 break;
