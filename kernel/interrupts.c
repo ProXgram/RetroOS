@@ -81,6 +81,9 @@ static const char* const EXCEPTION_NAMES[] = {
 
 static size_t panic_line = 0;
 static void panic_draw_bg(void) {
+    // Critical: Disable double buffering to ensure panic is seen on screen
+    graphics_disable_double_buffer();
+    
     if (graphics_get_width() > 0) graphics_fill_rect(0, 0, graphics_get_width(), graphics_get_height(), 0xFF0000AA);
     panic_line = 0;
 }
