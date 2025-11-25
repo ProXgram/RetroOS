@@ -199,21 +199,26 @@ static int focus_window(int index) {
     if (index < 0 || index >= MAX_WINDOWS || windows[index] == NULL) return -1;
     Window* target = windows[index];
     
-    // Move window to the end of the array (top of Z-order)
+    // Shift entire array down from 'index' to the end to remove the gap
     for (int i = index; i < MAX_WINDOWS - 1; i++) {
-        if (windows[i+1] == NULL) break;
         windows[i] = windows[i+1];
-        windows[i]->id = i;
+        if (windows[i]) windows[i]->id = i;
     }
+    // Clear the last slot (avoid duplication bug)
+    windows[MAX_WINDOWS - 1] = NULL;
     
+    // Find the new first empty slot at the end
     int top_slot = 0;
-    while (top_slot < MAX_WINDOWS - 1 && windows[top_slot] != NULL) top_slot++;
+    while (top_slot < MAX_WINDOWS && windows[top_slot] != NULL) top_slot++;
     
-    if (windows[top_slot] == NULL && top_slot > 0 && windows[top_slot-1] != target) {
-        windows[top_slot] = target; 
+    // Place target at the top (end of active list)
+    if (top_slot < MAX_WINDOWS) {
+        windows[top_slot] = target;
         target->id = top_slot;
-    } else { 
-        windows[top_slot] = target; 
+    } else {
+        // Fallback (shouldn't happen if logic is sound)
+        windows[MAX_WINDOWS - 1] = target;
+        target->id = MAX_WINDOWS - 1;
     }
 
     // Update flags
@@ -474,6 +479,35 @@ static void draw_bevel_rect(int x, int y, int w, int h, uint32_t fill, bool sunk
     graphics_fill_rect(x+w-1, y, 1, h, br);  
 }
 
+// Draws pixel-perfect icons for window controls
+static void draw_icon(int x, int y, int type, uint32_t color) {
+    // x,y is top-left of the icon 10x10 area
+    if (type == 0) { // Close (X)
+        for(int i=0; i<8; i++) {
+            graphics_put_pixel(x+1+i, y+1+i, color);
+            graphics_put_pixel(x+1+i, y+1+i+1, color); // Thickness
+            graphics_put_pixel(x+8-i, y+1+i, color);
+            graphics_put_pixel(x+8-i, y+1+i+1, color); 
+        }
+    } else if (type == 1) { // Maximize (Box)
+        graphics_fill_rect(x+1, y+1, 9, 2, color); // Top
+        graphics_fill_rect(x+1, y+8, 9, 2, color); // Bottom
+        graphics_fill_rect(x+1, y+1, 2, 9, color); // Left
+        graphics_fill_rect(x+8, y+1, 2, 9, color); // Right
+    } else if (type == 2) { // Restore (Two Boxes)
+        // Back box
+        graphics_fill_rect(x+3, y, 6, 2, color); 
+        graphics_fill_rect(x+7, y, 2, 6, color);
+        // Front box
+        graphics_fill_rect(x, y+3, 7, 2, color); // Top
+        graphics_fill_rect(x, y+8, 7, 2, color); // Bottom
+        graphics_fill_rect(x, y+3, 2, 7, color); // Left
+        graphics_fill_rect(x+5, y+3, 2, 7, color); // Right
+    } else if (type == 3) { // Minimize (_)
+        graphics_fill_rect(x+1, y+7, 8, 3, color);
+    }
+}
+
 // --- App Renderers ---
 
 static void render_terminal(Window* w, int cx, int cy) {
@@ -552,7 +586,7 @@ static void render_file_manager(Window* w, int cx, int cy) {
         const struct fs_file* f = fs_file_at(i); 
         if(!f) continue;
         
-        int ry = cy + 24 + i*18; 
+        int ry = cy + 24 + i * 18; 
         if(ry > cy+w->h-40) break;
         
         bool s = ((int)i == w->state.files.selected_index);
@@ -598,17 +632,20 @@ static void render_window(Window* w) {
     int bx = w->x+w->w-25;
     bool hc = rect_contains(bx, w->y+5, 20, 18, mouse.x, mouse.y);
     draw_bevel_rect(bx, w->y+5, 20, 18, hc?COL_RED_HOVER:COL_RED, false);
-    graphics_draw_char(bx+6, w->y+10, 'X', COL_WHITE, 0);
+    // Draw Close Icon
+    draw_icon(bx+5, w->y+9, 0, COL_WHITE);
     
     int mx = bx-22; 
     bool hm = rect_contains(mx, w->y+5, 20, 18, mouse.x, mouse.y);
     draw_bevel_rect(mx, w->y+5, 20, 18, hm?COL_BTN_HOVER:0xFFDDDDDD, false);
-    graphics_draw_char(mx+6, w->y+10, w->maximized?'^':'O', COL_BLACK, 0);
+    // Draw Max/Restore Icon
+    draw_icon(mx+5, w->y+9, w->maximized ? 2 : 1, COL_BLACK);
     
     int mn = mx-22; 
     bool hmn = rect_contains(mn, w->y+5, 20, 18, mouse.x, mouse.y);
     draw_bevel_rect(mn, w->y+5, 20, 18, hmn?COL_BTN_HOVER:0xFFDDDDDD, false);
-    graphics_draw_char(mn+6, w->y+10, '_', COL_BLACK, 0);
+    // Draw Minimize Icon
+    draw_icon(mn+5, w->y+9, 3, COL_BLACK);
     
     // Client Area
     int cx = w->x+4, cy = w->y+WIN_CAPTION_H+4;
