@@ -161,6 +161,7 @@ static int kstrlen_local(const char* s) {
 }
 
 static void get_time_string(char* buf) {
+    // Removed direct hardware access to prevent GPF in Ring 3
     str_copy(buf, "12:00");
 }
 
