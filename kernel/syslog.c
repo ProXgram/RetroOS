@@ -35,10 +35,19 @@ void syslog_write(const char* message) {
         return;
     }
 
-    for (const char* c = message; *c != '\0'; c++) {
-        outb(0xE9, (uint8_t)*c);
+    // Check current privilege level (CPL) from CS register
+    // If CPL is 3 (User Mode), we cannot execute 'outb' without GPF.
+    // We skip the debug port output in that case.
+    uint16_t cs;
+    __asm__ volatile("mov %%cs, %0" : "=r"(cs));
+    bool is_kernel = (cs & 3) == 0;
+
+    if (is_kernel) {
+        for (const char* c = message; *c != '\0'; c++) {
+            outb(0xE9, (uint8_t)*c);
+        }
+        outb(0xE9, '\n');
     }
-    outb(0xE9, '\n');
 
     size_t index;
     if (g_count < SYSLOG_CAPACITY) {
