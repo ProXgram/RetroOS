@@ -326,6 +326,21 @@ static void handle_settings_click(Window* w, int x, int y) {
     }
 }
 
+static void handle_files_click(Window* w, int x, int y) {
+    int cx = w->x + 4;
+    int cy = w->y + WIN_CAPTION_H + 4;
+    
+    size_t count = fs_file_count();
+    for (size_t i = 0; i < count; i++) {
+        int ry = cy + 24 + i * 18;
+        // Check if row is visible and clicked
+        if (ry + 18 < w->y + w->h && rect_contains(cx + 2, ry, w->w - 12, 18, x, y)) {
+            w->state.files.selected_index = (int)i;
+            return;
+        }
+    }
+}
+
 static void handle_terminal_input(Window* w, char c) {
     TerminalState* ts = &w->state.term;
     if (c == '\n') {
@@ -371,8 +386,9 @@ static void handle_calc_logic(Window* w, char key) {
     const char* btns = "789/456*123-C0=+";
     
     for(int b=0; b<16; b++) {
-        int bx = cx+(b%4)*40; 
-        int by = cy+(b/4)*35;
+        // FIX: Added +10 to bx calculation to match render_calc offsets
+        int bx = cx + 10 + (b%4)*40; 
+        int by = cy + (b/4)*35;
         if (rect_contains(bx, by, 35, 30, mouse.x, mouse.y)) {
             char c = btns[b]; 
             CalcState* s = &w->state.calc;
@@ -767,6 +783,7 @@ static void on_click(int x, int y) {
                 // App logic
                 if (w->type == APP_CALC) handle_calc_logic(w, 0); 
                 if (w->type == APP_SETTINGS) handle_settings_click(w, x, y);
+                if (w->type == APP_FILES) handle_files_click(w, x, y);
                 return;
             }
         }
