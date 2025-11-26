@@ -22,6 +22,10 @@ static void syscall_exit(void) {
     while(1);
 }
 
+static void syscall_log(const char* msg) {
+    __asm__ volatile("int $0x80" : : "D"((uint64_t)2), "S"(msg) : "memory");
+}
+
 static void syscall_shutdown(void) {
     __asm__ volatile("int $0x80" : : "D"((uint64_t)4) : "memory");
 }
@@ -60,6 +64,7 @@ void gui_set_running(bool running) { g_gui_running = running; }
 #define COL_TASKBAR     0xFF101010
 #define COL_WIN_BODY    0xFFF0F0F0
 #define COL_WIN_TITLE   0xFF2D2D2D
+#define COL_WIN_TITLE_1 0xFF003366
 #define COL_BTN_FACE    0xFFDDDDDD
 #define COL_BTN_SHADOW  0xFF999999
 #define COL_BTN_HILIGHT 0xFFFFFFFF
@@ -433,11 +438,6 @@ static int kstrlen_local(const char* s) {
     int len = 0; 
     while(s[len]) len++; 
     return len; 
-}
-
-static int kstrcmp(const char* s1, const char* s2) {
-    while(*s1 && (*s1 == *s2)) { s1++; s2++; }
-    return *(const unsigned char*)s1 - *(const unsigned char*)s2;
 }
 
 static unsigned long rand_state = 1234;
@@ -974,7 +974,7 @@ static void render_desktop(void) {
     struct { int x, y; const char* lbl; const uint8_t (*bmp)[24]; AppType app; } icons[] = {
         {20, 20, "Terminal", ICON_TERM, APP_TERMINAL},
         {20, 90, "Files", ICON_FOLDER, APP_FILES},
-        {20, 160, "Notepad", ICON_NOTE, APP_NOTEPAD},
+        {20, 160, "Paint", ICON_PAINT, APP_PAINT},
         {20, 230, "Browser", ICON_BROWSER, APP_BROWSER},
         {20, 300, "Calc", ICON_CALC, APP_CALC},
         {20, 370, "Task Mgr", ICON_TASKMGR, APP_TASKMGR},
@@ -1018,6 +1018,14 @@ static void render_desktop(void) {
     char time_buf[8]; syscall_get_time(time_buf);
     graphics_draw_string_scaled(screen_w - 60, ty+12, time_buf, COL_WHITE, COL_TASKBAR, 1);
     
+    // Debug Mouse Coordinates
+    char mouse_pos[16];
+    int_to_str(mouse.x, mouse_pos);
+    int len = kstrlen_local(mouse_pos);
+    mouse_pos[len] = ',';
+    int_to_str(mouse.y, mouse_pos+len+1);
+    graphics_draw_string_scaled(screen_w-150, ty+12, mouse_pos, 0xFF888888, COL_TASKBAR, 1);
+
     if (start_menu_open) {
         int w = 180; int h = 300; int y = screen_h - TASKBAR_H - h;
         graphics_fill_rect_alpha(0, y, w, h, 0xFF1F1F1F, 240);
@@ -1047,8 +1055,11 @@ static void render_desktop(void) {
     }
 
     int mx = mouse.x; int my_pos = mouse.y;
-    if (mx < 0) mx = 0; if (mx > screen_w - 12) mx = screen_w - 12;
-    if (my_pos < 0) my_pos = 0; if (my_pos > screen_h - 19) my_pos = screen_h - 19;
+    if (mx < 0) mx = 0; 
+    if (mx > screen_w - 12) mx = screen_w - 12;
+    if (my_pos < 0) my_pos = 0; 
+    if (my_pos > screen_h - 19) my_pos = screen_h - 19;
+    
     for(int y=0; y<19; y++) {
         for(int x=0; x<12; x++) {
             if(CURSOR_BITMAP[y][x] == 1) graphics_put_pixel(mx+x, my_pos+y, COL_BLACK);
