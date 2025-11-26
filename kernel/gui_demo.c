@@ -71,6 +71,7 @@ void gui_set_running(bool running) { g_gui_running = running; }
 #define COL_BTN_HILIGHT 0xFFFFFFFF
 #define COL_BLACK       0xFF000000
 #define COL_WHITE       0xFFFFFFFF
+#define COL_ACCENT      0xFF0078D7
 
 // Theme Structure
 typedef struct {
@@ -157,7 +158,7 @@ static MouseState mouse;
 static MouseState prev_mouse;
 static bool g_wallpaper_enabled = false;
 
-// Forward Declarations
+// --- Forward Declarations ---
 static void close_window(int index);
 static int focus_window(int index);
 static void toggle_maximize(Window* w);
@@ -244,9 +245,7 @@ static void create_window(AppType type, const char* title, int w, int h) {
     win->id = slot; win->type = type; str_copy(win->title, title);
     win->w = w; win->h = h; win->min_w = 150; win->min_h = 100;
     win->x = 40+(slot*20); win->y = 40+(slot*20);
-    
-    if(win->x+w > screen_w) win->x = 20; 
-    if(win->y+h > screen_h-TASKBAR_H) win->y = 20;
+    if(win->x+w > screen_w) win->x=20; if(win->y+h > screen_h-TASKBAR_H) win->y=20;
     
     win->visible = true; win->focused = true;
     win->minimized = false; win->maximized = false;
@@ -300,7 +299,137 @@ static void create_window(AppType type, const char* title, int w, int h) {
     focus_window(slot);
 }
 
-// --- Logic ---
+// --- Logic Implementation ---
+
+static void toggle_maximize(Window* w) {
+    if (w->maximized) { 
+        w->x = w->restore_x; w->y = w->restore_y; 
+        w->w = w->restore_w; w->h = w->restore_h; 
+        w->maximized = false; 
+    } else { 
+        w->restore_x = w->x; w->restore_y = w->y; 
+        w->restore_w = w->w; w->restore_h = w->h; 
+        w->x = 0; w->y = 0; w->w = screen_w; w->h = screen_h - TASKBAR_H; 
+        w->maximized = true; 
+    }
+}
+
+static void handle_settings_click(Window* w, int x, int y) {
+    if (rect_contains(w->x+80, w->y+15+WIN_CAPTION_H+2, 100, 24, x, y)) {
+        current_theme_idx = (current_theme_idx + 1) % 2;
+    }
+    if (rect_contains(w->x+110, w->y+55+WIN_CAPTION_H+2, 80, 24, x, y)) {
+        g_wallpaper_enabled = !g_wallpaper_enabled;
+        w->state.settings.wallpaper_enabled = g_wallpaper_enabled;
+    }
+}
+
+static void handle_files_click(Window* w, int x, int y) {
+    int cx = w->x + 4;
+    int cy = w->y + WIN_CAPTION_H + 4;
+    size_t count = fs_file_count();
+    for (size_t i = 0; i < count; i++) {
+        int ry = cy + 24 + i * 18;
+        if (ry + 18 < w->y + w->h && rect_contains(cx + 2, ry, w->w - 12, 18, x, y)) {
+            w->state.files.selected_index = (int)i;
+            return;
+        }
+    }
+}
+
+static void handle_taskmgr_click(Window* w, int x, int y) {
+    int cx = w->x + 10;
+    int cy = w->y + WIN_CAPTION_H + 10;
+    int list_y = cy + 30;
+    for(int i=0; i<MAX_WINDOWS; i++) {
+        if (windows[i] && windows[i]->visible) {
+            if (rect_contains(cx, list_y, w->w - 20, 20, x, y)) {
+                w->state.taskmgr.selected_pid = i;
+            }
+            list_y += 20;
+        }
+    }
+    if (w->state.taskmgr.selected_pid != -1) {
+        if (rect_contains(cx + w->w - 80, cy, 60, 24, x, y)) {
+             if (windows[w->state.taskmgr.selected_pid] != w) {
+                 close_window(w->state.taskmgr.selected_pid);
+                 w->state.taskmgr.selected_pid = -1;
+             }
+        }
+    }
+}
+
+static void handle_browser_click(Window* w, int x, int y) {
+    int cx = w->x;
+    int cy = w->y + WIN_CAPTION_H;
+    if (rect_contains(cx + w->w - 40, cy + 5, 30, 20, x, y)) {
+        str_copy(w->state.browser.status, "Loading...");
+    }
+}
+
+static void handle_calc_logic(Window* w, char key) {
+    (void)key; // Mouse click logic only for now
+    int cx = w->x + 14; 
+    int cy = w->y + WIN_CAPTION_H + 54;
+    const char* btns = "789/456*123-C0=+";
+    for(int b=0; b<16; b++) {
+        int bx = cx + 10 + (b%4)*40; 
+        int by = cy + (b/4)*35;
+        if (rect_contains(bx, by, 35, 30, mouse.x, mouse.y)) {
+            char c = btns[b]; 
+            CalcState* s = &w->state.calc;
+            if (c >= '0' && c <= '9') {
+                int d = c - '0';
+                if (s->new_entry) { s->current_val = d; s->new_entry = false; }
+                else if (s->current_val < 100000000) s->current_val = s->current_val * 10 + d;
+            } 
+            else if (c == 'C') { s->current_val = 0; s->accumulator = 0; s->op = 0; s->new_entry = true; } 
+            else if (c == '+' || c == '-' || c == '*' || c == '/') { s->accumulator = s->current_val; s->op = c; s->new_entry = true; } 
+            else if (c == '=') {
+                if (s->op == '+') s->current_val = s->accumulator + s->current_val;
+                else if (s->op == '-') s->current_val = s->accumulator - s->current_val;
+                else if (s->op == '*') s->current_val = s->accumulator * s->current_val;
+                else if (s->op == '/') { if(s->current_val!=0) s->current_val = s->accumulator / s->current_val; }
+                s->op = 0; s->new_entry = true;
+            }
+            return;
+        }
+    }
+}
+
+static void handle_terminal_input(Window* w, char c) {
+    TerminalState* ts = &w->state.term;
+    if (c == '\n') {
+        for (int i=0; i<5; i++) str_copy(ts->history[i], ts->history[i+1]);
+        char line[80]; 
+        str_copy(line, ts->prompt);
+        int p_len = kstrlen_local(line); 
+        int i = 0; 
+        while(ts->input[i] && p_len < 79) line[p_len++] = ts->input[i++];
+        line[p_len] = 0; 
+        str_copy(ts->history[5], line);
+        
+        if (kstrcmp(ts->input, "exit") == 0) close_window(w->id);
+        else if (kstrcmp(ts->input, "cls") == 0) for(int k=0; k<6; k++) ts->history[k][0] = 0;
+        
+        ts->input[0] = 0; 
+        ts->input_len = 0;
+    } 
+    else if (c == '\b') { if (ts->input_len > 0) ts->input[--ts->input_len] = 0; } 
+    else if (c >= 32 && c <= 126 && ts->input_len < 60) { ts->input[ts->input_len++] = c; ts->input[ts->input_len] = 0; }
+}
+
+static void handle_browser_input(Window* w, char c) {
+    BrowserState* bs = &w->state.browser;
+    if (c == '\b') {
+        if (bs->url_len > 0) bs->url[--bs->url_len] = 0;
+    } else if (c == '\n') {
+        str_copy(bs->status, "Loaded.");
+    } else if (c >= 32 && c <= 126 && bs->url_len < 60) {
+        bs->url[bs->url_len++] = c;
+        bs->url[bs->url_len] = 0;
+    }
+}
 
 static void handle_minesweeper(Window* w, int rx, int ry, bool right_click) {
     MineState* ms = &w->state.mine;
@@ -345,6 +474,39 @@ static void handle_run_command(Window* w) {
     close_window(w->id);
 }
 
+static void handle_paint_click(Window* w, int x, int y) {
+    // Paint Palette Check
+    int rel_x = x - (w->x+6);
+    int rel_y = y - (w->y+WIN_CAPTION_H+6);
+    
+    if (rel_y < 40) { // Toolbar area
+        if (rel_y >= 5 && rel_y < 30) {
+            int col_idx = (rel_x - 5) / 30;
+            uint32_t p[] = {0xFF000000, 0xFFFFFFFF, 0xFFFF0000, 0xFF00FF00, 0xFF0000FF, 0xFFFFFF00, 0xFFFF00FF, 0xFF00FFFF};
+            if (col_idx >= 0 && col_idx < 8) w->state.paint.current_color = p[col_idx];
+        }
+        return;
+    }
+    
+    // Canvas Draw (Dot)
+    int cv_y = 40;
+    if (w->state.paint.canvas_buffer && rel_x >= 0 && rel_x < w->state.paint.width && rel_y >= cv_y) {
+        // Draw simplified dot
+        int draw_y = rel_y - cv_y;
+        int w_width = w->state.paint.width;
+        int sz = w->state.paint.brush_size;
+        for(int dy=-sz; dy<=sz; dy++) {
+            for(int dx=-sz; dx<=sz; dx++) {
+                int px = rel_x + dx;
+                int py = draw_y + dy;
+                if (px >= 0 && px < w_width && py >= 0 && py < w->state.paint.height) {
+                    w->state.paint.canvas_buffer[py * w_width + px] = w->state.paint.current_color;
+                }
+            }
+        }
+    }
+}
+
 static void update_sysmon(Window* w) {
     SysMonState* s = &w->state.sysmon;
     s->update_tick++;
@@ -375,7 +537,7 @@ static void draw_bevel_box(int x, int y, int w, int h, bool sunk) {
     graphics_fill_rect(x+w-1, y, 1, h, br);
 }
 
-static void draw_window(Window* w) {
+static void render_window(Window* w) {
     Theme* t = &themes[current_theme_idx];
     
     if (!w->maximized) graphics_fill_rect_alpha(w->x+6, w->y+6, w->w, w->h, 0x000000, 60);
@@ -469,13 +631,16 @@ static void draw_window(Window* w) {
         graphics_draw_string_scaled(cx+cw-50, cy+ch-22, "Run", COL_BLACK, 0xFFDDDDDD, 1);
     }
     else if (w->type == APP_PAINT) {
-        int th = 30;
+        int th = 40;
+        // Toolbar
         graphics_fill_rect(cx, cy, cw, th, 0xFFDDDDDD);
-        uint32_t p[] = {0xFF000000, 0xFFFF0000, 0xFF00FF00, 0xFF0000FF, 0xFFFFFF00, 0xFFFFFFFF};
-        for(int i=0; i<6; i++) {
-            graphics_fill_rect(cx+5+i*25, cy+5, 20, 20, p[i]);
-            if (w->state.paint.current_color == p[i]) graphics_fill_rect(cx+5+i*25, cy+26, 20, 2, COL_BLACK);
+        uint32_t p[] = {0xFF000000, 0xFFFFFFFF, 0xFFFF0000, 0xFF00FF00, 0xFF0000FF, 0xFFFFFF00, 0xFFFF00FF, 0xFF00FFFF};
+        for(int i=0; i<8; i++) {
+            graphics_fill_rect(cx+5+i*30, cy+5, 25, 25, p[i]);
+            if (w->state.paint.current_color == p[i]) graphics_fill_rect(cx+5+i*30, cy+30, 25, 3, 0xFF000000);
         }
+        
+        int cv_y = th;
         if (w->state.paint.canvas_buffer) {
             uint32_t* b = w->state.paint.canvas_buffer;
             int bw = w->state.paint.width;
@@ -554,31 +719,29 @@ static void draw_window(Window* w) {
         }
     }
 
-    // Resize Grip
     graphics_fill_rect(w->x + w->w - RESIZE_HANDLE, w->y + w->h - RESIZE_HANDLE, RESIZE_HANDLE, RESIZE_HANDLE, 0xFF888888);
 }
 
-// --- Icon Bitmaps (Re-added for full feature set) ---
-static const uint8_t CURSOR_BITMAP[19][12] = {
-    {1,1,0,0,0,0,0,0,0,0,0,0}, {1,2,1,0,0,0,0,0,0,0,0,0}, {1,2,2,1,0,0,0,0,0,0,0,0},
-    {1,2,2,2,1,0,0,0,0,0,0,0}, {1,2,2,2,2,1,0,0,0,0,0,0}, {1,2,2,2,2,2,1,0,0,0,0,0},
-    {1,2,2,2,2,2,2,1,0,0,0,0}, {1,2,2,2,2,2,2,2,1,0,0,0}, {1,2,2,2,2,2,2,2,2,1,0,0},
-    {1,2,2,2,2,2,2,2,2,2,1,0}, {1,2,2,2,2,2,1,1,1,1,1,1}, {1,2,2,2,2,2,1,0,0,0,0,0},
-    {1,2,1,1,2,2,1,0,0,0,0,0}, {1,1,0,1,2,2,1,0,0,0,0,0}, {0,0,0,0,1,2,2,1,0,0,0,0},
-    {0,0,0,0,1,2,2,1,0,0,0,0}, {0,0,0,0,0,1,2,2,1,0,0,0}, {0,0,0,0,0,1,2,2,1,0,0,0},
-    {0,0,0,0,0,0,1,1,0,0,0,0}
-};
-
-// Simplified 8x8 Placeholders to save space/compile time but keep logic intact
-// Real icons are large arrays, for brevity in this fix I'll use blank or simple patterns 
-// but keeping the structure so it compiles. 
-// In a real update, full 24x24 arrays are used.
-static const uint8_t ICON_GENERIC[24][24] = {{0}}; // Placeholder for valid symbols
-
 static void draw_icon_bitmap(int x, int y, const uint8_t bitmap[24][24]) {
-    (void)bitmap; // Suppress unused for now if using placeholder
-    // Draw simple box as fallback if array is empty
-    graphics_fill_rect(x, y, 24, 24, 0xFFCCCCCC);
+    for (int ry=0; ry<24; ry++) {
+        for (int rx=0; rx<24; rx++) {
+            uint8_t c = bitmap[ry][rx];
+            if (c != 0) {
+                uint32_t col = 0;
+                switch(c) {
+                    case 1: col = 0xFF000000; break;
+                    case 2: col = 0xFF444444; break;
+                    case 3: col = 0xFF888888; break;
+                    case 4: col = 0xFFFFFFFF; break;
+                    case 5: col = 0xFFFFCC00; break;
+                    case 6: col = 0xFF0000AA; break;
+                    case 7: col = 0xFF00AA00; break;
+                    case 8: col = 0xFFAA0000; break;
+                }
+                graphics_put_pixel(x+rx, y+ry, col);
+            }
+        }
+    }
 }
 
 static void draw_wallpaper(void) {
@@ -600,6 +763,13 @@ static void draw_wallpaper(void) {
         uint32_t ccol = (fast_rand() % 2) ? 0xFFFF7F50 : 0xFFFF69B4; 
         graphics_fill_rect(cx, cy, cw, ch, ccol);
     }
+    
+    rand_state = (timer_get_ticks() / 10) + 100;
+    for (int i = 0; i < 15; i++) {
+        int bx = fast_rand() % screen_w;
+        int by = fast_rand() % (screen_h - 100);
+        graphics_fill_rect(bx, by, 4, 4, 0x80FFFFFF); 
+    }
 }
 
 static void render_desktop(void) {
@@ -609,24 +779,21 @@ static void render_desktop(void) {
         graphics_fill_rect(0, 0, screen_w, screen_h, COL_DESKTOP);
     }
     
-    struct { int x, y; const char* lbl; AppType app; } icons[] = {
-        {20, 20, "Terminal", APP_TERMINAL},
-        {20, 90, "Files", APP_FILES},
-        {20, 160, "Paint", APP_PAINT},
-        {20, 230, "Browser", APP_BROWSER},
-        {20, 300, "Calc", APP_CALC},
-        {20, 370, "Task Mgr", APP_TASKMGR},
-        {20, 440, "Settings", APP_SETTINGS},
-        {20, 510, "Mines", APP_MINESWEEPER},
-        {100, 20, "SysMon", APP_SYSMON}
+    struct { int x, y; const char* lbl; const uint8_t (*bmp)[24]; AppType app; } icons[] = {
+        {20, 20, "Terminal", ICON_TERM, APP_TERMINAL},
+        {20, 90, "Files", ICON_FOLDER, APP_FILES},
+        {20, 160, "Paint", ICON_PAINT, APP_PAINT},
+        {20, 230, "Browser", ICON_BROWSER, APP_BROWSER},
+        {20, 300, "Calc", ICON_CALC, APP_CALC},
+        {20, 370, "Task Mgr", ICON_TASKMGR, APP_TASKMGR},
+        {20, 440, "Settings", ICON_SET, APP_SETTINGS},
+        {100, 20, "Trash", ICON_TRASH, APP_NONE}
     };
     
-    for (int i=0; i<9; i++) {
+    for (int i=0; i<8; i++) {
         bool h = rect_contains(icons[i].x, icons[i].y, 64, 60, mouse.x, mouse.y);
         if (h) graphics_fill_rect(icons[i].x-5, icons[i].y-5, 50, 50, 0x40FFFFFF);
-        
-        draw_icon_bitmap(icons[i].x + 8, icons[i].y, ICON_GENERIC);
-        
+        draw_icon_bitmap(icons[i].x + 8, icons[i].y, icons[i].bmp);
         graphics_draw_string_scaled(icons[i].x+2, icons[i].y+36, icons[i].lbl, COL_BLACK, 0, 1);
         graphics_draw_string_scaled(icons[i].x+1, icons[i].y+35, icons[i].lbl, COL_WHITE, 0, 1);
     }
@@ -636,7 +803,9 @@ static void render_desktop(void) {
     }
 
     int ty = screen_h - TASKBAR_H;
-    graphics_fill_rect_alpha(0, ty, screen_w, TASKBAR_H, COL_TASKBAR, 200);
+    Theme* t = &themes[current_theme_idx];
+    if (t->is_glass) graphics_fill_rect_alpha(0, ty, screen_w, TASKBAR_H, t->taskbar, 200);
+    else graphics_fill_rect(0, ty, screen_w, TASKBAR_H, t->taskbar);
     
     bool start_hover = rect_contains(0, ty, 70, TASKBAR_H, mouse.x, mouse.y);
     uint32_t s_col = start_menu_open ? 0xFF0050A0 : (start_hover ? 0xFF303030 : 0xFF202020);
@@ -657,17 +826,17 @@ static void render_desktop(void) {
     }
 
     char time_buf[8]; syscall_get_time(time_buf);
-    graphics_draw_string_scaled(screen_w - 60, ty+12, time_buf, COL_WHITE, COL_TASKBAR, 1);
+    graphics_draw_string_scaled(screen_w - 60, ty+12, time_buf, COL_WHITE, t->taskbar, 1);
     
     char mouse_pos[16];
     int_to_str(mouse.x, mouse_pos);
     int len = kstrlen_local(mouse_pos);
     mouse_pos[len] = ',';
     int_to_str(mouse.y, mouse_pos+len+1);
-    graphics_draw_string_scaled(screen_w-150, ty+12, mouse_pos, 0xFF888888, COL_TASKBAR, 1);
+    graphics_draw_string_scaled(screen_w-150, ty+12, mouse_pos, 0xFF888888, t->taskbar, 1);
 
     if (start_menu_open) {
-        int w = 180; int h = 330; int y = screen_h - TASKBAR_H - h;
+        int w = 180; int h = 300; int y = screen_h - TASKBAR_H - h;
         graphics_fill_rect_alpha(0, y, w, h, 0xFF1F1F1F, 240);
         graphics_fill_rect(0, y, w, 1, 0xFF404040);
         struct { int y_off; const char* lbl; AppType app; } items[] = {
@@ -852,13 +1021,17 @@ void gui_demo_run(void) {
                 if(top->type == APP_PAINT && top->state.paint.canvas_buffer) {
                     top->state.paint.width = top->w - 12;
                 }
+            } else if (top->type == APP_PAINT && rect_contains(top->x+6, top->y+WIN_CAPTION_H+36, top->w-12, top->h-WIN_CAPTION_H-12, mouse.x, mouse.y)) {
+                // Paint dragging logic
+                int rel_x = mouse.x - (top->x+6);
+                int rel_y = mouse.y - (top->y+WIN_CAPTION_H+36);
+                // Simulate dragging by calling click handler repeatedly
+                // But handle_paint_click expects absolute coords
+                handle_paint_click(top, mouse.x, mouse.y);
             }
         }
         
         if (mouse.left_button && !prev_mouse.left_button) on_click(mouse.x, mouse.y);
-        if (mouse.left_button && top && top->type == APP_PAINT && rect_contains(top->x, top->y+WIN_CAPTION_H, top->w, top->h-WIN_CAPTION_H, mouse.x, mouse.y)) {
-            handle_paint_click(top, mouse.x, mouse.y);
-        }
         if (!mouse.left_button) for(int i=0; i<MAX_WINDOWS; i++) if(windows[i]) {
             windows[i]->dragging = false;
             windows[i]->resizing = false;
