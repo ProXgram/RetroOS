@@ -983,7 +983,8 @@ static void render_paint_app(Window* w) {
     int tool_h = 40;
     graphics_fill_rect(cx, cy, cw, tool_h, 0xFFE0E0E0);
     
-    uint32_t colors[] = {0xFF000000, 0xFFFFFFFF, 0xFFFF0000, 0xFF00FF00, 0xFF0000FF, 0xFFFFFF00, 0xFFFFFFFF};
+    // Fixed: Added last color to match loop count of 8
+    uint32_t colors[] = {0xFF000000, 0xFFFFFFFF, 0xFFFF0000, 0xFF00FF00, 0xFF0000FF, 0xFFFFFF00, 0xFFFF00FF, 0xFF00FFFF};
     for(int i=0; i<8; i++) {
         int px = cx + 5 + (i*30);
         int py = cy + 5;
@@ -1129,7 +1130,7 @@ static void render_window(Window* w) {
                 if (w->state.taskmgr.selected_pid == i) {
                     graphics_fill_rect(cx+8, list_y-2, cw-16, 14, 0xFFCCCCFF);
                 }
-                char buf[64];
+                // Fixed: Removed unused 'buf'
                 char pid_s[4]; int_to_str(i, pid_s);
                 graphics_draw_string_scaled(cx+10, list_y, pid_s, COL_BLACK, COL_WIN_BODY, 1);
                 graphics_draw_string_scaled(cx+50, list_y, windows[i]->title, COL_BLACK, COL_WIN_BODY, 1);
@@ -1140,6 +1141,38 @@ static void render_window(Window* w) {
         }
         draw_bevel_box(cx + cw - 80, cy + 10, 60, 24, false);
         graphics_draw_string_scaled(cx+cw-70, cy+16, "End Task", COL_BLACK, COL_BTN_FACE, 1);
+    }
+    else if (w->type == APP_SYSMON) {
+        graphics_draw_string_scaled(cx+10, cy+10, "CPU Usage History", COL_BLACK, COL_WIN_BODY, 1);
+        int graph_x = cx + 10;
+        int graph_y = cy + 30;
+        int graph_w = cw - 20;
+        int graph_h = 60;
+        
+        // Background
+        graphics_fill_rect(graph_x, graph_y, graph_w, graph_h, COL_BLACK);
+        
+        // Draw CPU line
+        for(int i=0; i<SYSMON_HIST; i++) {
+            int idx = (w->state.sysmon.head - i + SYSMON_HIST) % SYSMON_HIST;
+            int val = w->state.sysmon.cpu_hist[idx]; // 0-100ish
+            if (val > 100) val = 100;
+            int bar_h = (val * graph_h) / 100;
+            int bx = graph_x + graph_w - 2 - (i * 3);
+            if (bx > graph_x) {
+                graphics_fill_rect(bx, graph_y + graph_h - bar_h, 2, bar_h, 0xFF00FF00);
+            }
+        }
+
+        // Memory usage text
+        char mem_str[32];
+        str_copy(mem_str, "Mem: ");
+        char num[8]; int_to_str(w->state.sysmon.mem_hist[w->state.sysmon.head], num);
+        int l = kstrlen_local(mem_str);
+        int k=0; while(num[k]) mem_str[l++] = num[k++]; 
+        mem_str[l++] = '%'; mem_str[l] = 0;
+        
+        graphics_draw_string_scaled(cx+10, cy+100, mem_str, COL_BLACK, COL_WIN_BODY, 1);
     }
     else if (w->type == APP_SETTINGS) {
         graphics_draw_string_scaled(cx+10, cy+10, "Desktop Wallpaper:", COL_BLACK, COL_WIN_BODY, 1);
@@ -1469,6 +1502,13 @@ void gui_demo_run(void) {
         if (!mouse.left_button) for(int i=0; i<MAX_WINDOWS; i++) if(windows[i]) {
             windows[i]->dragging = false;
             windows[i]->resizing = false;
+        }
+
+        // Fixed: Added SysMon update logic
+        for(int i=0; i<MAX_WINDOWS; i++) {
+            if(windows[i] && windows[i]->type == APP_SYSMON) {
+                 update_sysmon(windows[i]);
+            }
         }
 
         render_desktop();
