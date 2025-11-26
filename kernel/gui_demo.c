@@ -96,8 +96,33 @@ static int current_theme_idx = 0;
 typedef enum { 
     APP_NONE, APP_WELCOME, APP_NOTEPAD, APP_CALC, APP_FILES, 
     APP_SETTINGS, APP_TERMINAL, APP_BROWSER, APP_TASKMGR, APP_PAINT,
-    APP_MINESWEEPER, APP_SYSMON, APP_RUN, APP_TICTACTOE, APP_IMAGEVIEW
+    APP_MINESWEEPER, APP_SYSMON, APP_RUN, APP_TICTACTOE, APP_IMAGEVIEW,
+    APP_ABOUT
 } AppType;
+
+// --- Context Menu Actions ---
+enum {
+    CTX_NONE,
+    CTX_REFRESH,
+    CTX_WALLPAPER,
+    CTX_NEW_FILE,
+    CTX_SYS_INFO,
+    CTX_ABOUT
+};
+
+typedef struct {
+    char label[32];
+    int action_id;
+} MenuItem;
+
+typedef struct {
+    bool active;
+    int x, y, w, h;
+    MenuItem items[8];
+    int count;
+} ContextMenu;
+
+static ContextMenu g_ctx_menu;
 
 // --- App States ---
 typedef struct { int current_val; int accumulator; char op; bool new_entry; } CalcState;
@@ -143,6 +168,11 @@ typedef struct {
     int update_tick;
 } SysMonState;
 
+// About Window
+typedef struct {
+    int scroll_y;
+} AboutState;
+
 typedef struct {
     int id; AppType type; char title[32]; 
     int x, y, w, h;
@@ -155,7 +185,7 @@ typedef struct {
         SettingsState settings; TerminalState term; BrowserState browser;
         TaskMgrState taskmgr; PaintState paint; MineState mine;
         SysMonState sysmon; RunState run; TicTacToeState ttt;
-        ImageViewState img;
+        ImageViewState img; AboutState about;
     } state;
 } Window;
 
@@ -172,6 +202,7 @@ static MouseState mouse;
 static MouseState prev_mouse;
 static bool g_wallpaper_enabled = false;
 static bool g_desktop_shown_mode = false;
+static int g_wallpaper_seed = 1234;
 
 // --- Forward Declarations ---
 static void close_window(int index);
@@ -192,9 +223,16 @@ static void handle_imageview(Window* w, int x, int y);
 static void render_window(Window* w);
 static void draw_wallpaper(void);
 static void on_click(int x, int y);
+static void on_right_click(int x, int y);
 static void update_sysmon(Window* w);
 static void create_window(AppType type, const char* title, int w, int h);
 static Window* get_top_window(void);
+
+// Context Menu
+static void show_context_menu(int x, int y);
+static void hide_context_menu(void);
+static void handle_context_menu_click(int x, int y);
+static void render_context_menu(void);
 
 // Pseudo-random
 static unsigned long rand_state = 1234;
@@ -457,7 +495,7 @@ static const uint8_t ICON_IMAGE[24][24] = {
     {0,1,4,4,5,5,4,4,4,4,4,4,4,4,4,4,4,4,4,4,4,1,0,0},
     {0,1,4,4,4,4,4,4,4,4,4,4,4,4,4,4,4,4,4,4,4,1,0,0},
     {0,1,4,4,4,4,4,4,4,4,4,4,4,4,4,4,4,4,4,4,4,1,0,0},
-    {0,1,4,4,4,4,4,4,4,4,4,4,4,4,4,4,7,7,4,4,4,1,0,0},
+    {0,1,4,4,4,4,4,4,4,4,4,4,4,4,4,7,7,7,4,4,4,1,0,0},
     {0,1,4,4,4,4,4,4,4,4,4,4,4,4,4,7,7,7,7,4,4,1,0,0},
     {0,1,4,4,4,4,4,4,4,4,4,4,4,4,7,7,7,7,7,7,4,1,0,0},
     {0,1,4,4,4,4,4,4,4,4,4,4,4,7,7,7,7,7,7,7,4,1,0,0},
@@ -469,6 +507,33 @@ static const uint8_t ICON_IMAGE[24][24] = {
     {0,1,4,4,4,4,4,7,7,7,7,6,6,6,6,6,6,6,6,6,4,1,0,0},
     {0,1,4,4,4,4,7,7,7,7,6,6,6,6,6,6,6,6,6,6,4,1,0,0},
     {0,1,1,1,1,1,1,1,1,1,1,1,1,1,1,1,1,1,1,1,1,1,0,0},
+    {0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0},
+    {0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0}
+};
+
+static const uint8_t ICON_INFO[24][24] = {
+    {0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0},
+    {0,0,0,0,0,0,0,0,0,1,1,1,1,1,1,0,0,0,0,0,0,0,0,0},
+    {0,0,0,0,0,0,0,1,1,4,4,4,4,4,4,1,1,0,0,0,0,0,0,0},
+    {0,0,0,0,0,0,1,4,4,4,4,4,4,4,4,4,4,1,0,0,0,0,0,0},
+    {0,0,0,0,0,1,4,4,4,6,6,6,6,4,4,4,4,4,1,0,0,0,0,0},
+    {0,0,0,0,1,4,4,4,6,6,4,4,6,6,4,4,4,4,4,1,0,0,0,0},
+    {0,0,0,0,1,4,4,4,6,6,4,4,6,6,4,4,4,4,4,1,0,0,0,0},
+    {0,0,0,1,4,4,4,4,4,6,6,6,6,4,4,4,4,4,4,4,1,0,0,0},
+    {0,0,0,1,4,4,4,4,4,4,4,4,4,4,4,4,4,4,4,4,1,0,0,0},
+    {0,0,0,1,4,4,4,4,4,4,6,6,6,4,4,4,4,4,4,4,1,0,0,0},
+    {0,0,0,1,4,4,4,4,4,4,6,6,6,4,4,4,4,4,4,4,1,0,0,0},
+    {0,0,0,1,4,4,4,4,4,4,6,6,6,4,4,4,4,4,4,4,1,0,0,0},
+    {0,0,0,1,4,4,4,4,4,4,6,6,6,4,4,4,4,4,4,4,1,0,0,0},
+    {0,0,0,1,4,4,4,4,4,4,6,6,6,4,4,4,4,4,4,4,1,0,0,0},
+    {0,0,0,1,4,4,4,4,4,4,6,6,6,4,4,4,4,4,4,4,1,0,0,0},
+    {0,0,0,0,1,4,4,4,4,4,6,6,6,4,4,4,4,4,4,1,0,0,0,0},
+    {0,0,0,0,1,4,4,4,4,4,6,6,6,4,4,4,4,4,4,1,0,0,0,0},
+    {0,0,0,0,0,1,4,4,4,4,4,4,4,4,4,4,4,4,1,0,0,0,0,0},
+    {0,0,0,0,0,0,1,4,4,4,4,4,4,4,4,4,4,1,0,0,0,0,0,0},
+    {0,0,0,0,0,0,0,1,1,4,4,4,4,4,4,1,1,0,0,0,0,0,0,0},
+    {0,0,0,0,0,0,0,0,0,1,1,1,1,1,1,0,0,0,0,0,0,0,0,0},
+    {0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0},
     {0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0},
     {0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0}
 };
@@ -595,6 +660,9 @@ static void create_window(AppType type, const char* title, int w, int h) {
     } else if (type == APP_BROWSER) {
         str_copy(win->state.browser.url, "www.retro-os.net");
         win->state.browser.url_len = kstrlen_local("www.retro-os.net");
+    } else if (type == APP_ABOUT) {
+        win->min_w = 300; win->min_h = 200;
+        win->state.about.scroll_y = 0;
     }
 
     windows[slot] = win;
@@ -722,6 +790,7 @@ static void handle_run_command(Window* w) {
     else if (kstrcmp(cmd, "browser") == 0) create_window(APP_BROWSER, "Browser", 500, 400);
     else if (kstrcmp(cmd, "ttt") == 0) create_window(APP_TICTACTOE, "Tic-Tac-Toe", 220, 240);
     else if (kstrcmp(cmd, "img") == 0) create_window(APP_IMAGEVIEW, "Image Viewer", 300, 300);
+    else if (kstrcmp(cmd, "about") == 0) create_window(APP_ABOUT, "About Nostalux", 320, 240);
     else if (kstrcmp(cmd, "exit") == 0) syscall_shutdown();
     close_window(w->id);
 }
@@ -898,6 +967,93 @@ static void update_sysmon(Window* w) {
     }
 }
 
+// --- Context Menu Functions ---
+static void show_context_menu(int x, int y) {
+    g_ctx_menu.active = true;
+    g_ctx_menu.x = x; g_ctx_menu.y = y;
+    g_ctx_menu.w = 120;
+    
+    // Define items
+    str_copy(g_ctx_menu.items[0].label, "Refresh");
+    g_ctx_menu.items[0].action_id = CTX_REFRESH;
+    
+    str_copy(g_ctx_menu.items[1].label, "Next Wallpaper");
+    g_ctx_menu.items[1].action_id = CTX_WALLPAPER;
+    
+    str_copy(g_ctx_menu.items[2].label, "New File");
+    g_ctx_menu.items[2].action_id = CTX_NEW_FILE;
+    
+    str_copy(g_ctx_menu.items[3].label, "System Info");
+    g_ctx_menu.items[3].action_id = CTX_SYS_INFO;
+    
+    str_copy(g_ctx_menu.items[4].label, "About");
+    g_ctx_menu.items[4].action_id = CTX_ABOUT;
+    
+    g_ctx_menu.count = 5;
+    g_ctx_menu.h = g_ctx_menu.count * 20 + 4;
+}
+
+static void hide_context_menu(void) {
+    g_ctx_menu.active = false;
+}
+
+static void handle_context_menu_click(int x, int y) {
+    if (!g_ctx_menu.active) return;
+    
+    // Check bounds
+    if (x >= g_ctx_menu.x && x < g_ctx_menu.x + g_ctx_menu.w &&
+        y >= g_ctx_menu.y && y < g_ctx_menu.y + g_ctx_menu.h) {
+        
+        int idx = (y - g_ctx_menu.y - 2) / 20;
+        if (idx >= 0 && idx < g_ctx_menu.count) {
+            int action = g_ctx_menu.items[idx].action_id;
+            switch(action) {
+                case CTX_REFRESH: 
+                    // Simple refresh effect handled by redraw
+                    break;
+                case CTX_WALLPAPER:
+                    g_wallpaper_enabled = true;
+                    g_wallpaper_seed = fast_rand() % 1000;
+                    break;
+                case CTX_NEW_FILE:
+                    create_window(APP_NOTEPAD, "Untitled.txt", 300, 200);
+                    break;
+                case CTX_SYS_INFO:
+                    create_window(APP_SYSMON, "System Monitor", 300, 200);
+                    break;
+                case CTX_ABOUT:
+                    create_window(APP_ABOUT, "About Nostalux", 320, 240);
+                    break;
+            }
+        }
+    }
+    
+    hide_context_menu();
+}
+
+static void render_context_menu(void) {
+    if (!g_ctx_menu.active) return;
+    
+    // Shadow
+    graphics_fill_rect(g_ctx_menu.x + 4, g_ctx_menu.y + 4, g_ctx_menu.w, g_ctx_menu.h, 0x60000000);
+    // Body
+    graphics_fill_rect(g_ctx_menu.x, g_ctx_menu.y, g_ctx_menu.w, g_ctx_menu.h, COL_WIN_BODY);
+    // Border
+    graphics_fill_rect(g_ctx_menu.x, g_ctx_menu.y, g_ctx_menu.w, 1, 0xFF808080);
+    graphics_fill_rect(g_ctx_menu.x, g_ctx_menu.y, 1, g_ctx_menu.h, 0xFF808080);
+    graphics_fill_rect(g_ctx_menu.x, g_ctx_menu.y + g_ctx_menu.h - 1, g_ctx_menu.w, 1, 0xFF202020);
+    graphics_fill_rect(g_ctx_menu.x + g_ctx_menu.w - 1, g_ctx_menu.y, 1, g_ctx_menu.h, 0xFF202020);
+    
+    for(int i=0; i<g_ctx_menu.count; i++) {
+        int iy = g_ctx_menu.y + 2 + (i * 20);
+        bool hover = rect_contains(g_ctx_menu.x, iy, g_ctx_menu.w, 20, mouse.x, mouse.y);
+        if (hover) graphics_fill_rect(g_ctx_menu.x + 2, iy, g_ctx_menu.w - 4, 20, COL_ACCENT);
+        
+        graphics_draw_string_scaled(g_ctx_menu.x + 10, iy + 6, g_ctx_menu.items[i].label, 
+            hover ? COL_WHITE : COL_BLACK, hover ? COL_ACCENT : COL_WIN_BODY, 1);
+    }
+}
+
 // --- Drawing ---
 
 static void graphics_fill_rect_gradient(int x, int y, int w, int h, uint32_t c1, uint32_t c2) {
@@ -956,7 +1112,7 @@ static void draw_wallpaper(void) {
     }
     graphics_fill_rect(0, screen_h - 100, screen_w, 100, 0xFFD2B48C);
     
-    rand_state = 999;
+    rand_state = g_wallpaper_seed;
     for (int i = 0; i < 15; i++) {
         int cx = fast_rand() % screen_w;
         int ch = 30 + (fast_rand() % 50);
@@ -1063,6 +1219,25 @@ static void render_window(Window* w) {
     } 
     else if (w->type == APP_PAINT) {
         render_paint_app(w);
+    }
+    else if (w->type == APP_ABOUT) {
+        graphics_draw_string_scaled(cx+20, cy+20, "NostaluxOS", COL_ACCENT, COL_WIN_BODY, 3);
+        graphics_draw_string_scaled(cx+20, cy+50, "Version 1.1", COL_BLACK, COL_WIN_BODY, 1);
+        graphics_draw_string_scaled(cx+20, cy+70, "(C) 2025 Retro Systems", COL_BLACK, COL_WIN_BODY, 1);
+        
+        draw_bevel_box(cx+10, cy+100, cw-20, 100, true);
+        graphics_fill_rect(cx+12, cy+102, cw-24, 96, COL_WHITE);
+        
+        const char* credits[] = {
+            "Kernel: x86_64",
+            "GUI: Glass Window Manager",
+            "Features: Apps, Themes,", 
+            "Context Menu, Versions",
+            "Status: Active Development"
+        };
+        for(int i=0; i<5; i++) {
+            graphics_draw_string_scaled(cx+16, cy+106 + (i*14), credits[i], COL_BLACK, COL_WHITE, 1);
+        }
     }
     else if (w->type == APP_TICTACTOE) {
         TicTacToeState* s = &w->state.ttt;
@@ -1178,7 +1353,7 @@ static void render_window(Window* w) {
         graphics_draw_string_scaled(cx+10, cy+10, "Desktop Wallpaper:", COL_BLACK, COL_WIN_BODY, 1);
         bool on = w->state.settings.wallpaper_enabled;
         draw_bevel_box(cx+10, cy+30, 140, 30, on);
-        const char* lbl = on ? "Enabled (Coral)" : "Disabled (Blue)";
+        const char* lbl = on ? "Enabled (Random)" : "Disabled (Blue)";
         graphics_draw_string_scaled(cx+20, cy+40, lbl, COL_BLACK, COL_BTN_FACE, 1);
         graphics_draw_string_scaled(cx+10, cy+80, "System Theme: Ocean", COL_BLACK, COL_WIN_BODY, 1);
     }
@@ -1233,7 +1408,12 @@ static void render_taskbar(void) {
     if (t->is_glass) graphics_fill_rect_alpha(0, ty, screen_w, TASKBAR_H, t->taskbar, 200);
     else graphics_fill_rect(0, ty, screen_w, TASKBAR_H, t->taskbar);
     
+    // Start Button with Hover
     uint32_t sb = start_menu_open ? 0xFF004400 : 0xFF006600;
+    if (rect_contains(2, ty+2, 60, TASKBAR_H-4, mouse.x, mouse.y)) {
+        sb = 0xFF008800; // Hover green
+    }
+    
     graphics_fill_rect(2, ty+2, 60, TASKBAR_H-4, sb);
     graphics_draw_string_scaled(10, ty+12, "START", COL_WHITE, sb, 1);
     
@@ -1244,6 +1424,11 @@ static void render_taskbar(void) {
             uint32_t bg = active ? 0xFF505050 : 0xFF303030;
             if (!t->is_glass && active) bg = 0xFFFFFFFF;
             if (!t->is_glass && !active) bg = 0xFFC0C0C0;
+            
+            // Hover effect on taskbar items
+            if (rect_contains(tx, ty+2, 100, TASKBAR_H-4, mouse.x, mouse.y)) {
+                 bg = active ? 0xFF606060 : 0xFF404040;
+            }
             
             graphics_fill_rect(tx, ty+2, 100, TASKBAR_H-4, bg);
             uint32_t tc = t->is_glass ? COL_WHITE : COL_BLACK;
@@ -1280,9 +1465,10 @@ static void render_desktop(void) {
         {20, 440, "Settings", ICON_SET, APP_SETTINGS},
         {100, 20, "Game", ICON_GAME, APP_TICTACTOE},
         {100, 90, "Images", ICON_IMAGE, APP_IMAGEVIEW},
+        {100, 160, "About", ICON_INFO, APP_ABOUT},
     };
     
-    for (int i=0; i<9; i++) {
+    for (int i=0; i<10; i++) {
         bool h = rect_contains(icons[i].x, icons[i].y, 64, 60, mouse.x, mouse.y);
         if (h) graphics_fill_rect(icons[i].x-5, icons[i].y-5, 50, 50, 0x40FFFFFF);
         draw_icon_bitmap(icons[i].x + 8, icons[i].y, icons[i].bmp);
@@ -1295,6 +1481,9 @@ static void render_desktop(void) {
     }
 
     render_taskbar();
+    
+    // Draw Context Menu on top of everything
+    render_context_menu();
 
     char time_buf[8]; syscall_get_time(time_buf);
     
@@ -1348,7 +1537,17 @@ static void render_desktop(void) {
     }
 }
 
+static void on_right_click(int x, int y) {
+    if (start_menu_open) start_menu_open = false;
+    show_context_menu(x, y);
+}
+
 static void on_click(int x, int y) {
+    if (g_ctx_menu.active) {
+        handle_context_menu_click(x, y);
+        return;
+    }
+
     int ty = screen_h - TASKBAR_H;
     
     if (start_menu_open) {
@@ -1380,7 +1579,7 @@ static void on_click(int x, int y) {
         for(int i=0; i<MAX_WINDOWS; i++) {
             if(windows[i] && windows[i]->visible) {
                 if(x >= tx && x < tx+100) {
-                    if (windows[i]->focused && !windows[i]->minimized) windows[i]->minimized = true;
+                    if (windows[i]->focused && !windows[i].minimized) windows[i]->minimized = true;
                     else { windows[i]->minimized = false; focus_window(i); }
                     return;
                 }
@@ -1438,9 +1637,9 @@ static void on_click(int x, int y) {
         {20, 160, "Paint", APP_PAINT}, {20, 230, "Browser", APP_BROWSER},
         {20, 300, "Calc", APP_CALC}, {20, 370, "Task Mgr", APP_TASKMGR},
         {20, 440, "Settings", APP_SETTINGS}, {100, 20, "Tic-Tac-Toe", APP_TICTACTOE},
-        {100, 90, "ImageView", APP_IMAGEVIEW}
+        {100, 90, "ImageView", APP_IMAGEVIEW}, {100, 160, "About", APP_ABOUT}
     };
-    for(int i=0; i<9; i++) {
+    for(int i=0; i<10; i++) {
         if (rect_contains(icons[i].x, icons[i].y, 60, 60, x, y)) {
             create_window(icons[i].t, icons[i].n, 400, 300); return;
         }
@@ -1455,6 +1654,8 @@ void gui_demo_run(void) {
     mouse.x = screen_w / 2; mouse.y = screen_h / 2;
     for(int i=0; i<MAX_WINDOWS; i++) windows[i] = NULL;
     create_window(APP_WELCOME, "Welcome", 350, 200);
+
+    g_ctx_menu.active = false;
 
     while(1) {
         syscall_yield();
@@ -1480,7 +1681,7 @@ void gui_demo_run(void) {
         prev_mouse = mouse; 
         syscall_get_mouse(&mouse);
         
-        if (mouse.left_button && top) {
+        if (mouse.left_button && top && !g_ctx_menu.active) {
             if (top->dragging) {
                 top->x = mouse.x - top->drag_off_x; top->y = mouse.y - top->drag_off_y;
             } else if (top->resizing) {
@@ -1498,7 +1699,16 @@ void gui_demo_run(void) {
             }
         }
         
-        if (mouse.left_button && !prev_mouse.left_button) on_click(mouse.x, mouse.y);
+        // Handle Left Click
+        if (mouse.left_button && !prev_mouse.left_button) {
+             on_click(mouse.x, mouse.y);
+        }
+
+        // Handle Right Click (Context Menu)
+        if (mouse.right_button && !prev_mouse.right_button) {
+            on_right_click(mouse.x, mouse.y);
+        }
+
         if (!mouse.left_button) for(int i=0; i<MAX_WINDOWS; i++) if(windows[i]) {
             windows[i]->dragging = false;
             windows[i]->resizing = false;
