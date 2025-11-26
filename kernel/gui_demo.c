@@ -57,18 +57,17 @@ void gui_set_running(bool running) { g_gui_running = running; }
 // --- Configuration ---
 #define MAX_WINDOWS 16
 #define WIN_CAPTION_H 26
-#define TASKBAR_H 30
+#define TASKBAR_H 34
 
-// Colors (Classic Theme)
-#define COL_DESKTOP     0xFF3A6EA5 
-#define COL_TASKBAR     0xFFC0C0C0
-#define COL_WIN_BODY    0xFFC0C0C0
-#define COL_WIN_TITLE_1 0xFF000080
-#define COL_WIN_TITLE_2 0xFF1084D0
-#define COL_WIN_TEXT    0xFFFFFFFF
-#define COL_WIN_TEXT_IN 0xFFC0C0C0
-#define COL_BTN_FACE    0xFFC0C0C0
-#define COL_BTN_SHADOW  0xFF404040
+// Colors (Nostalux Ocean Theme)
+#define COL_DESKTOP     0xFF004488 
+#define COL_TASKBAR     0xFF202020
+#define COL_WIN_BODY    0xFFE0E0E0
+#define COL_WIN_TITLE_1 0xFF003366
+#define COL_WIN_TITLE_2 0xFF0055AA
+#define COL_WIN_TEXT    0xFF000000
+#define COL_BTN_FACE    0xFFDDDDDD
+#define COL_BTN_SHADOW  0xFF555555
 #define COL_BTN_HILIGHT 0xFFFFFFFF
 #define COL_BLACK       0xFF000000
 #define COL_WHITE       0xFFFFFFFF
@@ -80,7 +79,9 @@ typedef enum {
     APP_CALC, 
     APP_FILES, 
     APP_SETTINGS, 
-    APP_TERMINAL 
+    APP_TERMINAL,
+    APP_BROWSER,
+    APP_TASKMGR
 } AppType;
 
 typedef struct { 
@@ -101,7 +102,8 @@ typedef struct {
 } FileManagerState;
 
 typedef struct { 
-    int dummy; 
+    bool wallpaper_enabled;
+    int theme_id;
 } SettingsState;
 
 typedef struct { 
@@ -110,6 +112,17 @@ typedef struct {
     int input_len; 
     char history[6][64]; 
 } TerminalState;
+
+typedef struct {
+    char url[64];
+    int url_len;
+    char status[32];
+    int scroll;
+} BrowserState;
+
+typedef struct {
+    int selected_pid;
+} TaskMgrState;
 
 typedef struct {
     int id; 
@@ -125,6 +138,8 @@ typedef struct {
         FileManagerState files; 
         SettingsState settings; 
         TerminalState term; 
+        BrowserState browser;
+        TaskMgrState taskmgr;
     } state;
 } Window;
 
@@ -133,7 +148,7 @@ static bool start_menu_open = false;
 static int screen_w, screen_h;
 static MouseState mouse;
 static MouseState prev_mouse;
-static uint32_t desktop_color = COL_DESKTOP;
+static bool g_wallpaper_enabled = true; // Default to on
 
 // --- BITMAPS ---
 
@@ -176,6 +191,62 @@ static const uint8_t ICON_TERM[24][24] = {
     {1,1,1,1,1,1,1,1,1,1,1,1,1,1,1,1,1,1,1,1,1,1,1,1},
     {1,1,1,1,1,1,1,1,1,1,1,1,1,1,1,1,1,1,1,1,1,1,1,1},
     {1,1,1,1,1,1,1,1,1,1,1,1,1,1,1,1,1,1,1,1,1,1,1,1},
+    {1,1,1,1,1,1,1,1,1,1,1,1,1,1,1,1,1,1,1,1,1,1,1,1}
+};
+
+// Browser Icon (Globe-ish)
+static const uint8_t ICON_BROWSER[24][24] = {
+    {0,0,0,0,0,0,0,6,6,6,6,6,6,6,0,0,0,0,0,0,0,0,0,0},
+    {0,0,0,0,0,6,6,6,6,6,6,6,6,6,6,6,0,0,0,0,0,0,0,0},
+    {0,0,0,0,6,6,6,6,6,6,4,4,6,6,6,6,6,0,0,0,0,0,0,0},
+    {0,0,0,6,6,6,6,6,4,4,4,4,4,4,6,6,6,6,0,0,0,0,0,0},
+    {0,0,6,6,6,6,6,4,4,4,4,4,4,4,4,6,6,6,6,0,0,0,0,0},
+    {0,0,6,6,6,6,4,4,4,4,4,4,4,4,4,4,6,6,6,0,0,0,0,0},
+    {0,6,6,6,6,4,4,4,4,4,4,4,4,4,4,4,4,6,6,6,0,0,0,0},
+    {0,6,6,6,4,4,4,4,6,6,6,6,6,6,4,4,4,4,6,6,0,0,0,0},
+    {6,6,6,4,4,4,6,6,6,6,6,6,6,6,6,6,4,4,4,6,6,0,0,0},
+    {6,6,6,4,4,6,6,6,6,6,6,6,6,6,6,6,6,4,4,6,6,0,0,0},
+    {6,6,6,4,6,6,6,6,6,6,6,6,6,6,6,6,6,6,4,6,6,0,0,0},
+    {6,6,6,4,6,6,6,6,6,6,6,6,6,6,6,6,6,6,4,6,6,0,0,0},
+    {6,6,6,4,6,6,6,6,6,6,6,6,6,6,6,6,6,6,4,6,6,0,0,0},
+    {6,6,6,4,4,6,6,6,6,6,6,6,6,6,6,6,6,4,4,6,6,0,0,0},
+    {6,6,6,4,4,4,6,6,6,6,6,6,6,6,6,6,4,4,4,6,6,0,0,0},
+    {0,6,6,6,4,4,4,4,6,6,6,6,6,6,4,4,4,4,6,6,0,0,0,0},
+    {0,6,6,6,6,4,4,4,4,4,4,4,4,4,4,4,4,6,6,6,0,0,0,0},
+    {0,0,6,6,6,6,4,4,4,4,4,4,4,4,4,4,6,6,6,0,0,0,0,0},
+    {0,0,6,6,6,6,6,4,4,4,4,4,4,4,4,6,6,6,6,0,0,0,0,0},
+    {0,0,0,6,6,6,6,6,4,4,4,4,4,4,6,6,6,6,0,0,0,0,0,0},
+    {0,0,0,0,6,6,6,6,6,6,4,4,6,6,6,6,6,0,0,0,0,0,0,0},
+    {0,0,0,0,0,6,6,6,6,6,6,6,6,6,6,6,0,0,0,0,0,0,0,0},
+    {0,0,0,0,0,0,0,6,6,6,6,6,6,6,0,0,0,0,0,0,0,0,0,0},
+    {0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0}
+};
+
+// Task Manager Icon (Graph-ish)
+static const uint8_t ICON_TASKMGR[24][24] = {
+    {1,1,1,1,1,1,1,1,1,1,1,1,1,1,1,1,1,1,1,1,1,1,1,1},
+    {1,2,2,2,2,2,2,2,2,2,2,2,2,2,2,2,2,2,2,2,2,2,2,1},
+    {1,2,1,1,1,1,1,1,1,1,1,1,1,1,1,1,1,1,1,1,1,1,2,1},
+    {1,2,1,1,1,1,1,1,1,1,1,1,1,1,1,1,1,1,1,1,1,1,2,1},
+    {1,2,1,1,1,1,1,1,1,1,1,1,1,1,1,1,1,1,1,1,1,1,2,1},
+    {1,2,1,1,1,1,1,1,1,1,1,1,1,1,1,1,1,1,7,1,1,1,2,1},
+    {1,2,1,1,1,1,1,1,1,1,1,1,1,1,1,7,7,7,7,1,1,1,2,1},
+    {1,2,1,1,1,1,1,1,1,1,1,1,1,1,7,7,1,1,1,1,1,1,2,1},
+    {1,2,1,1,1,1,1,1,1,1,1,1,1,7,7,1,1,1,1,1,1,1,2,1},
+    {1,2,1,1,1,1,1,1,1,1,1,1,1,7,1,1,1,1,1,1,1,1,2,1},
+    {1,2,1,1,1,1,1,1,1,1,1,1,7,7,1,1,1,1,1,1,1,1,2,1},
+    {1,2,1,1,1,1,1,1,1,1,1,1,7,1,1,1,1,1,1,1,1,1,2,1},
+    {1,2,1,1,1,1,1,1,1,1,7,7,7,1,1,1,1,1,1,1,1,1,2,1},
+    {1,2,1,1,1,1,1,1,1,7,7,1,1,1,1,1,1,1,1,1,1,1,2,1},
+    {1,2,1,1,1,1,1,1,1,7,1,1,1,1,1,1,1,1,1,1,1,1,2,1},
+    {1,2,1,1,1,1,1,7,7,7,1,1,1,1,1,1,1,1,1,1,1,1,2,1},
+    {1,2,1,1,1,1,7,7,1,1,1,1,1,1,1,1,1,1,1,1,1,1,2,1},
+    {1,2,1,1,1,1,7,1,1,1,1,1,1,1,1,1,1,1,1,1,1,1,2,1},
+    {1,2,1,1,7,7,7,1,1,1,1,1,1,1,1,1,1,1,1,1,1,1,2,1},
+    {1,2,1,7,7,1,1,1,1,1,1,1,1,1,1,1,1,1,1,1,1,1,2,1},
+    {1,2,1,7,1,1,1,1,1,1,1,1,1,1,1,1,1,1,1,1,1,1,2,1},
+    {1,2,1,1,1,1,1,1,1,1,1,1,1,1,1,1,1,1,1,1,1,1,2,1},
+    {1,2,2,2,2,2,2,2,2,2,2,2,2,2,2,2,2,2,2,2,2,2,2,1},
     {1,1,1,1,1,1,1,1,1,1,1,1,1,1,1,1,1,1,1,1,1,1,1,1}
 };
 
@@ -352,12 +423,18 @@ static int kstrlen_local(const char* s) {
     return len; 
 }
 
+// Pseudo-random for wallpaper
+static unsigned long rand_state = 1234;
+static int fast_rand(void) {
+    rand_state = rand_state * 1103515245 + 12345;
+    return (unsigned int)(rand_state / 65536) % 32768;
+}
+
 static void close_window(int index) {
     if (index < 0 || index >= MAX_WINDOWS || windows[index] == NULL) return;
     syscall_free(windows[index]); 
     windows[index] = NULL;
     
-    // Shift windows down to fill gap
     for (int i = index; i < MAX_WINDOWS - 1; i++) {
         windows[i] = windows[i+1];
         if (windows[i]) windows[i]->id = i; 
@@ -419,8 +496,8 @@ static void create_window(AppType type, const char* title, int w, int h) {
     win->w = w; 
     win->h = h; 
     
-    win->x = 50 + (slot * 25); 
-    win->y = 50 + (slot * 25);
+    win->x = 50 + (slot * 30); 
+    win->y = 50 + (slot * 30);
     
     if (win->x + w > screen_w) win->x = 40;
     if (win->y + h > screen_h - TASKBAR_H) win->y = 40;
@@ -431,6 +508,7 @@ static void create_window(AppType type, const char* title, int w, int h) {
     win->dragging = false; 
     win->focused = true;
 
+    // Initialize App State
     if (type == APP_NOTEPAD) { 
         win->state.notepad.length = 0; 
         win->state.notepad.buffer[0] = 0; 
@@ -441,7 +519,7 @@ static void create_window(AppType type, const char* title, int w, int h) {
         win->state.calc.accumulator = 0;
     } 
     else if (type == APP_TERMINAL) {
-        str_copy(win->state.term.prompt, "user@ring3 $ "); 
+        str_copy(win->state.term.prompt, "user@nostalux $ "); 
         win->state.term.input[0] = 0; 
         win->state.term.input_len = 0;
         for(int k=0; k<6; k++) win->state.term.history[k][0] = 0;
@@ -449,6 +527,18 @@ static void create_window(AppType type, const char* title, int w, int h) {
     } 
     else if (type == APP_FILES) { 
         win->state.files.selected_index = -1; 
+    }
+    else if (type == APP_BROWSER) {
+        str_copy(win->state.browser.url, "www.nostalux.org");
+        win->state.browser.url_len = kstrlen_local("www.nostalux.org");
+        str_copy(win->state.browser.status, "Ready");
+    }
+    else if (type == APP_TASKMGR) {
+        win->state.taskmgr.selected_pid = -1;
+    }
+    else if (type == APP_SETTINGS) {
+        win->state.settings.wallpaper_enabled = g_wallpaper_enabled;
+        win->state.settings.theme_id = 0;
     }
     
     windows[slot] = win; 
@@ -458,16 +548,13 @@ static void create_window(AppType type, const char* title, int w, int h) {
 // --- Interaction Handlers ---
 
 static void handle_settings_click(Window* w, int x, int y) {
-    int cx = w->x + 4; 
-    int cy = w->y + WIN_CAPTION_H + 4;
-    uint32_t colors[] = { 0xFF3A6EA5, 0xFF008080, 0xFF502020, 0xFF000000 };
-    
-    for (int i = 0; i < 4; i++) {
-        int bx = cx + 10 + (i * 40);
-        if (rect_contains(bx, cy + 30, 30, 30, x, y)) {
-            desktop_color = colors[i];
-            return;
-        }
+    int cx = w->x + 10;
+    int cy = w->y + WIN_CAPTION_H + 10;
+
+    // Toggle Wallpaper Button
+    if (rect_contains(cx, cy, 140, 30, x, y)) {
+        g_wallpaper_enabled = !g_wallpaper_enabled;
+        w->state.settings.wallpaper_enabled = g_wallpaper_enabled;
     }
 }
 
@@ -481,6 +568,45 @@ static void handle_files_click(Window* w, int x, int y) {
             w->state.files.selected_index = (int)i;
             return;
         }
+    }
+}
+
+static void handle_taskmgr_click(Window* w, int x, int y) {
+    // Kill button logic could go here
+    int cx = w->x + 10;
+    int cy = w->y + WIN_CAPTION_H + 10;
+    
+    // Simulate list selection
+    int list_y = cy + 30;
+    for(int i=0; i<MAX_WINDOWS; i++) {
+        if (windows[i] && windows[i]->visible) {
+            if (rect_contains(cx, list_y, w->w - 20, 20, x, y)) {
+                w->state.taskmgr.selected_pid = i;
+            }
+            list_y += 20;
+        }
+    }
+    
+    // Kill button
+    if (w->state.taskmgr.selected_pid != -1) {
+        if (rect_contains(cx + w->w - 80, cy, 60, 24, x, y)) {
+            // Can't kill self properly in this loop without crash risk, but let's try
+             if (windows[w->state.taskmgr.selected_pid] != w) {
+                 close_window(w->state.taskmgr.selected_pid);
+                 w->state.taskmgr.selected_pid = -1;
+             }
+        }
+    }
+}
+
+static void handle_browser_click(Window* w, int x, int y) {
+    int cx = w->x;
+    int cy = w->y + WIN_CAPTION_H;
+    
+    // Go button
+    if (rect_contains(cx + w->w - 40, cy + 5, 30, 20, x, y)) {
+        str_copy(w->state.browser.status, "Loading...");
+        // In a real OS, this would trigger a network request
     }
 }
 
@@ -504,6 +630,18 @@ static void handle_terminal_input(Window* w, char c) {
     } 
     else if (c == '\b') { if (ts->input_len > 0) ts->input[--ts->input_len] = 0; } 
     else if (c >= 32 && c <= 126 && ts->input_len < 60) { ts->input[ts->input_len++] = c; ts->input[ts->input_len] = 0; }
+}
+
+static void handle_browser_input(Window* w, char c) {
+    BrowserState* bs = &w->state.browser;
+    if (c == '\b') {
+        if (bs->url_len > 0) bs->url[--bs->url_len] = 0;
+    } else if (c == '\n') {
+        str_copy(bs->status, "Loaded.");
+    } else if (c >= 32 && c <= 126 && bs->url_len < 60) {
+        bs->url[bs->url_len++] = c;
+        bs->url[bs->url_len] = 0;
+    }
 }
 
 static void handle_calc_logic(Window* w, char key) {
@@ -559,30 +697,17 @@ static void draw_bevel_box(int x, int y, int w, int h, bool sunk) {
     graphics_fill_rect(x, y, 1, h, tl);
     graphics_fill_rect(x, y+h-1, w, 1, br);
     graphics_fill_rect(x+w-1, y, 1, h, br);
-    // Inner bevel for softer look
-    if (!sunk) {
-        graphics_fill_rect(x+1, y+1, w-2, 1, COL_BTN_FACE); // Top inner
-        graphics_fill_rect(x+1, y+1, 1, h-2, COL_BTN_FACE); // Left inner
-        graphics_fill_rect(x+1, y+h-2, w-2, 1, 0xFF808080); // Bot inner
-        graphics_fill_rect(x+w-2, y+1, 1, h-2, 0xFF808080); // Right inner
-    }
 }
 
 static void draw_window_border(int x, int y, int w, int h) {
-    // 3D Frame
-    graphics_fill_rect(x, y, w, h, COL_BTN_FACE);
-    graphics_fill_rect(x, y, w, 1, COL_BTN_HILIGHT);
-    graphics_fill_rect(x, y, 1, h, COL_BTN_HILIGHT);
-    graphics_fill_rect(x, y+h-1, w, 1, COL_BLACK);
-    graphics_fill_rect(x+w-1, y, 1, h, COL_BLACK);
-    
-    graphics_fill_rect(x+1, y+1, w-2, 1, COL_BTN_FACE);
-    graphics_fill_rect(x+1, y+1, 1, h-2, COL_BTN_FACE);
-    graphics_fill_rect(x+1, y+h-2, w-2, 1, COL_BTN_SHADOW);
-    graphics_fill_rect(x+w-2, y+1, 1, h-2, COL_BTN_SHADOW);
+    // Modern-ish flat border
+    graphics_fill_rect(x, y, w, h, COL_WIN_BODY);
+    graphics_fill_rect(x, y, w, 1, 0xFF808080);
+    graphics_fill_rect(x, y, 1, h, 0xFF808080);
+    graphics_fill_rect(x, y+h-1, w, 1, 0xFF202020);
+    graphics_fill_rect(x+w-1, y, 1, h, 0xFF202020);
 }
 
-// Draws the 24x24 icons
 static void draw_icon_bitmap(int x, int y, const uint8_t bitmap[24][24]) {
     for (int ry=0; ry<24; ry++) {
         for (int rx=0; rx<24; rx++) {
@@ -590,18 +715,54 @@ static void draw_icon_bitmap(int x, int y, const uint8_t bitmap[24][24]) {
             if (c != 0) {
                 uint32_t col = 0;
                 switch(c) {
-                    case 1: col = 0xFF000000; break; // Black
-                    case 2: col = 0xFF444444; break; // DkGrey
-                    case 3: col = 0xFF888888; break; // Grey
-                    case 4: col = 0xFFFFFFFF; break; // White
-                    case 5: col = 0xFFFFCC00; break; // Yellow
-                    case 6: col = 0xFF0000AA; break; // Blue
-                    case 7: col = 0xFF00AA00; break; // Green
-                    case 8: col = 0xFFAA0000; break; // Red
+                    case 1: col = 0xFF000000; break;
+                    case 2: col = 0xFF444444; break;
+                    case 3: col = 0xFF888888; break;
+                    case 4: col = 0xFFFFFFFF; break;
+                    case 5: col = 0xFFFFCC00; break;
+                    case 6: col = 0xFF0000AA; break;
+                    case 7: col = 0xFF00AA00; break;
+                    case 8: col = 0xFFAA0000; break;
                 }
                 graphics_put_pixel(x+rx, y+ry, col);
             }
         }
+    }
+}
+
+static void draw_wallpaper(void) {
+    // Procedural Underwater Wallpaper
+    // Use gradient for depth
+    for (int y = 0; y < screen_h; y++) {
+        // Deep blue to lighter blue
+        int r = 0;
+        int g = 20 + (y * 80 / screen_h);
+        int b = 60 + (y * 140 / screen_h);
+        uint32_t color = 0xFF000000 | (r << 16) | (g << 8) | b;
+        graphics_fill_rect(0, y, screen_w, 1, color);
+    }
+
+    // Draw Sand at bottom
+    graphics_fill_rect(0, screen_h - 100, screen_w, 100, 0xFFD2B48C); // Tan color
+
+    // Draw some "Coral" (Random colored rects)
+    // We use a deterministic seed so it doesn't flicker every frame
+    rand_state = 999;
+    for (int i = 0; i < 15; i++) {
+        int cx = fast_rand() % screen_w;
+        int ch = 30 + (fast_rand() % 50);
+        int cw = 10 + (fast_rand() % 30);
+        int cy = screen_h - 100 - ch + 10;
+        uint32_t ccol = (fast_rand() % 2) ? 0xFFFF7F50 : 0xFFFF69B4; // Coral or HotPink
+        graphics_fill_rect(cx, cy, cw, ch, ccol);
+    }
+    
+    // Draw Bubbles
+    rand_state = (timer_get_ticks() / 10) + 100; // Animate slightly
+    for (int i = 0; i < 20; i++) {
+        int bx = fast_rand() % screen_w;
+        int by = fast_rand() % (screen_h - 100);
+        graphics_fill_rect(bx, by, 4, 4, 0x80FFFFFF); // Semi-transparent white fake
     }
 }
 
@@ -610,65 +771,121 @@ static void draw_icon_bitmap(int x, int y, const uint8_t bitmap[24][24]) {
 static void render_window(Window* w) {
     if (!w || !w->visible || w->minimized) return;
 
-    // Window shadow (if not maximized)
-    if (!w->maximized) {
-        graphics_fill_rect(w->x+4, w->y+4, w->w, w->h, 0x50000000);
-    }
+    // Shadow
+    if (!w->maximized) graphics_fill_rect(w->x+6, w->y+6, w->w, w->h, 0x40000000);
 
-    // Border
     draw_window_border(w->x, w->y, w->w, w->h);
 
-    // Title Bar
+    // Title Bar Gradient
     uint32_t tcol1 = w->focused ? COL_WIN_TITLE_1 : 0xFF707070;
-    uint32_t tcol2 = w->focused ? COL_WIN_TITLE_2 : 0xFF909090;
     
-    // Gradient Title
-    for(int i=0; i<WIN_CAPTION_H-4; i++) {
-        graphics_fill_rect(w->x+3, w->y+3+i, w->w-6, 1, tcol1); // Simplified for now
-    }
-    graphics_fill_rect(w->x+3, w->y+3, w->w-6, WIN_CAPTION_H-4, tcol1);
-
-    graphics_draw_string_scaled(w->x+6, w->y+6, w->title, COL_WIN_TEXT, tcol1, 1);
+    graphics_fill_rect(w->x+2, w->y+2, w->w-4, WIN_CAPTION_H, tcol1);
+    graphics_draw_string_scaled(w->x+8, w->y+8, w->title, COL_WHITE, tcol1, 1);
 
     // Controls
-    int bx = w->x + w->w - 22;
-    draw_bevel_box(bx, w->y+5, 16, 14, false); // Close
-    graphics_draw_char(bx+4, w->y+8, 'X', COL_BLACK, COL_BTN_FACE);
+    int bx = w->x + w->w - 24;
+    draw_bevel_box(bx, w->y+4, 18, 18, false); // Close
+    graphics_draw_char(bx+5, w->y+9, 'X', COL_BLACK, COL_BTN_FACE);
 
-    int mx = bx - 20;
-    draw_bevel_box(mx, w->y+5, 16, 14, false); // Max/Restore
-    if (w->maximized) graphics_draw_char(mx+4, w->y+8, '2', COL_BLACK, COL_BTN_FACE); // Placeholder for icon
-    else graphics_draw_char(mx+4, w->y+8, '1', COL_BLACK, COL_BTN_FACE);
+    int mx = bx - 22;
+    draw_bevel_box(mx, w->y+4, 18, 18, false); // Max
+    graphics_draw_char(mx+5, w->y+9, '#', COL_BLACK, COL_BTN_FACE);
 
-    int mn = mx - 20;
-    draw_bevel_box(mn, w->y+5, 16, 14, false); // Min
-    graphics_draw_char(mn+4, w->y+6, '_', COL_BLACK, COL_BTN_FACE);
+    int mn = mx - 22;
+    draw_bevel_box(mn, w->y+4, 18, 18, false); // Min
+    graphics_draw_char(mn+5, w->y+9, '_', COL_BLACK, COL_BTN_FACE);
 
     // Client Area
-    int cx = w->x+4; int cy = w->y+WIN_CAPTION_H+2;
-    int cw = w->w-8; int ch = w->h-WIN_CAPTION_H-6;
+    int cx = w->x+2; int cy = w->y+WIN_CAPTION_H+2;
+    int cw = w->w-4; int ch = w->h-WIN_CAPTION_H-4;
     graphics_fill_rect(cx, cy, cw, ch, COL_WIN_BODY);
 
+    // App Specific
     if (w->type == APP_NOTEPAD) {
-        draw_bevel_box(cx, cy, cw, ch, true);
-        graphics_fill_rect(cx+2, cy+2, cw-4, ch-4, COL_WHITE);
-        graphics_draw_string_scaled(cx+4, cy+4, w->state.notepad.buffer, COL_BLACK, COL_WHITE, 1);
-        // Cursor
+        draw_bevel_box(cx+2, cy+2, cw-4, ch-4, true);
+        graphics_fill_rect(cx+4, cy+4, cw-8, ch-8, COL_WHITE);
+        graphics_draw_string_scaled(cx+6, cy+6, w->state.notepad.buffer, COL_BLACK, COL_WHITE, 1);
+        // Blinking cursor
         if ((timer_get_ticks() / 15) % 2) {
-             graphics_fill_rect(cx+4+(w->state.notepad.length*8), cy+4, 2, 10, COL_BLACK);
+             graphics_fill_rect(cx+6+(w->state.notepad.length*8), cy+6, 2, 10, COL_BLACK);
         }
     } 
-    else if (w->type == APP_TERMINAL) {
-        draw_bevel_box(cx, cy, cw, ch, true);
-        graphics_fill_rect(cx+2, cy+2, cw-4, ch-4, COL_BLACK);
-        for(int i=0; i<6; i++) 
-            graphics_draw_string_scaled(cx+4, cy+4+(i*10), w->state.term.history[i], 0xFF00FF00, COL_BLACK, 1);
+    else if (w->type == APP_BROWSER) {
+        // Address Bar
+        draw_bevel_box(cx+2, cy+2, cw-40, 24, true);
+        graphics_fill_rect(cx+4, cy+4, cw-44, 20, COL_WHITE);
+        graphics_draw_string_scaled(cx+6, cy+8, w->state.browser.url, COL_BLACK, COL_WHITE, 1);
         
-        int input_y = cy+64;
-        graphics_draw_string_scaled(cx+4, input_y, w->state.term.prompt, 0xFF00FF00, COL_BLACK, 1);
+        // Go Button
+        draw_bevel_box(cx+cw-35, cy+2, 30, 24, false);
+        graphics_draw_string_scaled(cx+cw-28, cy+8, "GO", COL_BLACK, COL_BTN_FACE, 1);
+        
+        // Content Area
+        int content_y = cy + 30;
+        int content_h = ch - 32;
+        graphics_fill_rect(cx+2, content_y, cw-4, content_h, COL_WHITE);
+        
+        // Mock Content
+        graphics_draw_string_scaled(cx+10, content_y+10, "Nostalux Web Browser v1.0", 0xFF0000AA, COL_WHITE, 2);
+        graphics_draw_string_scaled(cx+10, content_y+40, "Status:", 0xFF555555, COL_WHITE, 1);
+        graphics_draw_string_scaled(cx+70, content_y+40, w->state.browser.status, 0xFF00AA00, COL_WHITE, 1);
+        
+        graphics_draw_string_scaled(cx+10, content_y+70, "Welcome to the future of browsing!", COL_BLACK, COL_WHITE, 1);
+    }
+    else if (w->type == APP_TASKMGR) {
+        graphics_draw_string_scaled(cx+10, cy+10, "PID  Name        Status", COL_BLACK, COL_WIN_BODY, 1);
+        graphics_fill_rect(cx+10, cy+22, cw-20, 1, 0xFF888888);
+        
+        int list_y = cy + 30;
+        for(int i=0; i<MAX_WINDOWS; i++) {
+            if (windows[i] && windows[i]->visible) {
+                // Highlight selection
+                if (w->state.taskmgr.selected_pid == i) {
+                    graphics_fill_rect(cx+8, list_y-2, cw-16, 14, 0xFFCCCCFF);
+                }
+                
+                char buf[64];
+                // PID
+                char pid_s[4]; int_to_str(i, pid_s);
+                graphics_draw_string_scaled(cx+10, list_y, pid_s, COL_BLACK, COL_WIN_BODY, 1);
+                
+                // Name
+                graphics_draw_string_scaled(cx+50, list_y, windows[i]->title, COL_BLACK, COL_WIN_BODY, 1);
+                
+                // Status
+                const char* st = windows[i]->minimized ? "Min" : "Vis";
+                graphics_draw_string_scaled(cx+200, list_y, st, COL_BLACK, COL_WIN_BODY, 1);
+                
+                list_y += 20;
+            }
+        }
+        
+        // Kill Button at bottom
+        draw_bevel_box(cx + cw - 80, cy + 10, 60, 24, false);
+        graphics_draw_string_scaled(cx+cw-70, cy+16, "End Task", COL_BLACK, COL_BTN_FACE, 1);
+    }
+    else if (w->type == APP_SETTINGS) {
+        graphics_draw_string_scaled(cx+10, cy+10, "Desktop Wallpaper:", COL_BLACK, COL_WIN_BODY, 1);
+        
+        // Toggle Button
+        bool on = w->state.settings.wallpaper_enabled;
+        draw_bevel_box(cx+10, cy+30, 140, 30, on); // Pressed in if on
+        const char* lbl = on ? "Enabled (Coral)" : "Disabled (Blue)";
+        graphics_draw_string_scaled(cx+20, cy+40, lbl, COL_BLACK, COL_BTN_FACE, 1);
+        
+        graphics_draw_string_scaled(cx+10, cy+80, "System Theme: Ocean", COL_BLACK, COL_WIN_BODY, 1);
+    }
+    else if (w->type == APP_TERMINAL) {
+        draw_bevel_box(cx+2, cy+2, cw-4, ch-4, true);
+        graphics_fill_rect(cx+4, cy+4, cw-8, ch-8, COL_BLACK);
+        for(int i=0; i<6; i++) 
+            graphics_draw_string_scaled(cx+6, cy+6+(i*10), w->state.term.history[i], 0xFF00FF00, COL_BLACK, 1);
+        
+        int input_y = cy+66;
+        graphics_draw_string_scaled(cx+6, input_y, w->state.term.prompt, 0xFF00FF00, COL_BLACK, 1);
         int pw = kstrlen_local(w->state.term.prompt)*8;
-        graphics_draw_string_scaled(cx+4+pw, input_y, w->state.term.input, COL_WHITE, COL_BLACK, 1);
-        if ((timer_get_ticks()/15)%2) graphics_fill_rect(cx+4+pw+(w->state.term.input_len*8), input_y, 8, 8, 0xFF00FF00);
+        graphics_draw_string_scaled(cx+6+pw, input_y, w->state.term.input, COL_WHITE, COL_BLACK, 1);
+        if ((timer_get_ticks()/15)%2) graphics_fill_rect(cx+6+pw+(w->state.term.input_len*8), input_y, 8, 8, 0xFF00FF00);
     }
     else if (w->type == APP_CALC) {
         char buf[16]; int_to_str(w->state.calc.current_val, buf);
@@ -684,57 +901,49 @@ static void render_window(Window* w) {
         }
     }
     else if (w->type == APP_FILES) {
-        draw_bevel_box(cx, cy, cw, ch, true);
-        graphics_fill_rect(cx+2, cy+2, cw-4, ch-4, COL_WHITE);
-        graphics_fill_rect(cx+2, cy+2, cw-4, 18, COL_BTN_FACE);
-        graphics_draw_string_scaled(cx+6, cy+6, "Name", COL_BLACK, COL_BTN_FACE, 1);
+        draw_bevel_box(cx+2, cy+2, cw-4, ch-4, true);
+        graphics_fill_rect(cx+4, cy+4, cw-8, ch-8, COL_WHITE);
+        // Header
+        graphics_fill_rect(cx+4, cy+4, cw-8, 18, 0xFFCCCCCC);
+        graphics_draw_string_scaled(cx+8, cy+8, "Name", COL_BLACK, 0xFFCCCCCC, 1);
+        
         size_t count = fs_file_count();
         for (size_t i=0; i<count; i++) {
             const struct fs_file* f = fs_file_at(i); if(!f) continue;
-            int ry = cy+22 + i*16;
+            int ry = cy+24 + i*18;
             bool sel = ((int)i == w->state.files.selected_index);
-            if (sel) graphics_fill_rect(cx+2, ry, cw-4, 16, 0xFF000080);
-            draw_icon_bitmap(cx+4, ry, ICON_FOLDER); // Reuse folder icon scaled down? No, too big. 
-            // Just draw text for now
+            if (sel) graphics_fill_rect(cx+4, ry, cw-8, 18, 0xFF000080);
             graphics_draw_string_scaled(cx+20, ry+4, f->name, sel?COL_WHITE:COL_BLACK, sel?0xFF000080:COL_WHITE, 1);
             char sz[16]; int_to_str(f->size, sz);
             graphics_draw_string_scaled(cx+cw-60, ry+4, sz, sel?COL_WHITE:COL_BLACK, sel?0xFF000080:COL_WHITE, 1);
         }
-    }
-    else if (w->type == APP_SETTINGS) {
-        graphics_draw_string_scaled(cx+10, cy+10, "Background:", COL_BLACK, COL_WIN_BODY, 1);
-        uint32_t colors[] = { 0xFF3A6EA5, 0xFF008080, 0xFF502020, 0xFF000000 };
-        for(int i=0; i<4; i++) {
-            int bx = cx+10 + i*40;
-            draw_bevel_box(bx, cy+28, 30, 30, true);
-            graphics_fill_rect(bx+2, cy+30, 26, 26, colors[i]);
-        }
-    }
-    else {
-        graphics_draw_string_scaled(cx+20, cy+20, "Welcome to NostaluxOS", COL_BLACK, COL_WIN_BODY, 1);
-        graphics_draw_string_scaled(cx+20, cy+40, "Ring 3 GUI Demo", 0xFF555555, COL_WIN_BODY, 1);
     }
 }
 
 // --- Desktop Rendering ---
 
 static void render_desktop(void) {
-    // Background
-    graphics_fill_rect(0, 0, screen_w, screen_h, desktop_color);
+    if (g_wallpaper_enabled) {
+        draw_wallpaper();
+    } else {
+        graphics_fill_rect(0, 0, screen_w, screen_h, COL_DESKTOP);
+    }
     
-    // Icons
+    // Desktop Icons
     struct { int x, y; const char* lbl; const uint8_t (*bmp)[24]; AppType app; } icons[] = {
         {20, 20, "Terminal", ICON_TERM, APP_TERMINAL},
-        {20, 90, "My Files", ICON_FOLDER, APP_FILES},
+        {20, 90, "Files", ICON_FOLDER, APP_FILES},
         {20, 160, "Notepad", ICON_NOTE, APP_NOTEPAD},
-        {20, 230, "Calc", ICON_CALC, APP_CALC},
-        {20, 300, "Settings", ICON_SET, APP_SETTINGS},
-        {20, 370, "Trash", ICON_TRASH, APP_NONE}
+        {20, 230, "Browser", ICON_BROWSER, APP_BROWSER},
+        {20, 300, "Calc", ICON_CALC, APP_CALC},
+        {20, 370, "Task Mgr", ICON_TASKMGR, APP_TASKMGR},
+        {20, 440, "Settings", ICON_SET, APP_SETTINGS},
+        {100, 20, "Trash", ICON_TRASH, APP_NONE}
     };
     
-    for (int i=0; i<6; i++) {
+    for (int i=0; i<8; i++) {
         bool h = rect_contains(icons[i].x, icons[i].y, 64, 60, mouse.x, mouse.y);
-        if (h) graphics_fill_rect(icons[i].x-5, icons[i].y-5, 50, 50, 0x40000080);
+        if (h) graphics_fill_rect(icons[i].x-5, icons[i].y-5, 50, 50, 0x40FFFFFF);
         
         draw_icon_bitmap(icons[i].x + 8, icons[i].y, icons[i].bmp);
         
@@ -750,60 +959,62 @@ static void render_desktop(void) {
 
     // Taskbar
     int ty = screen_h - TASKBAR_H;
-    draw_bevel_box(0, ty, screen_w, TASKBAR_H, false);
+    graphics_fill_rect(0, ty, screen_w, TASKBAR_H, COL_TASKBAR);
+    graphics_fill_rect(0, ty, screen_w, 1, 0xFF555555);
     
     // Start Button
     bool start_hover = rect_contains(2, ty+2, 60, TASKBAR_H-4, mouse.x, mouse.y);
-    draw_bevel_box(2, ty+2, 60, TASKBAR_H-4, start_menu_open || (start_hover && mouse.left_button));
-    graphics_draw_string_scaled(10, ty+8, "Start", COL_BLACK, COL_BTN_FACE, 1);
+    uint32_t s_col = (start_menu_open || (start_hover && mouse.left_button)) ? 0xFF003366 : 0xFF0055AA;
+    graphics_fill_rect(2, ty+2, 60, TASKBAR_H-4, s_col);
+    graphics_draw_string_scaled(10, ty+10, "Start", COL_WHITE, s_col, 1);
 
     // Task Buttons
     int tx = 70;
     for(int i=0; i<MAX_WINDOWS; i++) {
         if(windows[i] && windows[i]->visible) {
             bool active = (windows[i]->focused && !windows[i]->minimized);
-            // Dotted pattern for active window button?
-            draw_bevel_box(tx, ty+2, 100, TASKBAR_H-4, active);
+            uint32_t bcol = active ? 0xFF444444 : 0xFF333333;
+            graphics_fill_rect(tx, ty+2, 100, TASKBAR_H-4, bcol);
             
             char s[12]; int c=0; while(c<10&&windows[i]->title[c]){s[c]=windows[i]->title[c];c++;} s[c]=0;
-            graphics_draw_string_scaled(tx+6, ty+8, s, COL_BLACK, COL_BTN_FACE, 1);
+            graphics_draw_string_scaled(tx+6, ty+10, s, COL_WHITE, bcol, 1);
+            
+            // Bottom highlight for active
+            if(active) graphics_fill_rect(tx, ty+TASKBAR_H-4, 100, 2, 0xFF0088FF);
             tx += 104;
         }
     }
 
     // System Tray
-    draw_bevel_box(screen_w-70, ty+2, 68, TASKBAR_H-4, true);
     char time_buf[8]; syscall_get_time(time_buf);
-    graphics_draw_string_scaled(screen_w-60, ty+8, time_buf, COL_BLACK, COL_BTN_FACE, 1);
+    graphics_draw_string_scaled(screen_w-60, ty+10, time_buf, COL_WHITE, COL_TASKBAR, 1);
 
     // Start Menu
     if (start_menu_open) {
-        int mh = 210; int my = ty - mh;
-        draw_window_border(0, my, 140, mh);
+        int mh = 250; int my = ty - mh;
+        draw_window_border(0, my, 160, mh);
         // Sidebar
-        graphics_fill_rect(2, my+2, 20, mh-4, COL_WIN_TITLE_1);
-        graphics_draw_char(8, my+mh-30, 'O', COL_WHITE, COL_WIN_TITLE_1);
-        graphics_draw_char(8, my+mh-40, 'S', COL_WHITE, COL_WIN_TITLE_1);
+        graphics_fill_rect(2, my+2, 30, mh-4, 0xFF003366);
         
         struct { int y; const char* lbl; AppType app; } items[] = { 
-            {my+10, "Terminal", APP_TERMINAL}, {my+40, "Files", APP_FILES}, 
-            {my+70, "Notepad", APP_NOTEPAD}, {my+100, "Calc", APP_CALC}, 
-            {my+130, "Settings", APP_SETTINGS}, {my+170, "Shutdown", APP_NONE} 
+            {my+10, "Browser", APP_BROWSER}, {my+40, "Terminal", APP_TERMINAL}, 
+            {my+70, "Files", APP_FILES}, {my+100, "Task Mgr", APP_TASKMGR},
+            {my+130, "Notepad", APP_NOTEPAD}, {my+160, "Calc", APP_CALC}, 
+            {my+190, "Settings", APP_SETTINGS}, {my+220, "Shutdown", APP_NONE} 
         };
-        for(int i=0; i<6; i++) {
-            if(i==5) graphics_fill_rect(26, items[i].y-8, 110, 1, 0xFF808080);
-            bool h = rect_contains(24, items[i].y, 114, 24, mouse.x, mouse.y);
-            if(h) graphics_fill_rect(24, items[i].y, 114, 24, COL_WIN_TITLE_1);
-            graphics_draw_string_scaled(34, items[i].y+6, items[i].lbl, h?COL_WHITE:COL_BLACK, h?COL_WIN_TITLE_1:COL_BTN_FACE, 1);
+        for(int i=0; i<8; i++) {
+            bool h = rect_contains(34, items[i].y, 120, 24, mouse.x, mouse.y);
+            if(h) graphics_fill_rect(34, items[i].y, 120, 24, 0xFFDDDDDD);
+            graphics_draw_string_scaled(40, items[i].y+6, items[i].lbl, COL_BLACK, h?0xFFDDDDDD:COL_WIN_BODY, 1);
         }
     }
 
     // Cursor
-    int mx = mouse.x; int my = mouse.y;
+    int mx = mouse.x; int my_pos = mouse.y;
     for(int y=0; y<19; y++) {
         for(int x=0; x<12; x++) {
             if(CURSOR_BITMAP[y][x]) 
-                graphics_put_pixel(mx+x, my+y, CURSOR_BITMAP[y][x]==1?COL_BLACK:COL_WHITE);
+                graphics_put_pixel(mx+x, my_pos+y, CURSOR_BITMAP[y][x]==1?COL_BLACK:COL_WHITE);
         }
     }
 }
@@ -813,14 +1024,16 @@ static void on_click(int x, int y) {
     
     // Start Menu
     if (start_menu_open) {
-        int mh = 210; int my = ty - mh;
-        if (x < 140 && y > my) {
-            if (rect_contains(24, my+10, 114, 24, x, y)) create_window(APP_TERMINAL, "Terminal", 400, 300);
-            else if (rect_contains(24, my+40, 114, 24, x, y)) create_window(APP_FILES, "Files", 400, 300);
-            else if (rect_contains(24, my+70, 114, 24, x, y)) create_window(APP_NOTEPAD, "Notepad", 300, 200);
-            else if (rect_contains(24, my+100, 114, 24, x, y)) create_window(APP_CALC, "Calc", 220, 300);
-            else if (rect_contains(24, my+130, 114, 24, x, y)) create_window(APP_SETTINGS, "Settings", 250, 200);
-            else if (rect_contains(24, my+170, 114, 30, x, y)) syscall_shutdown();
+        int mh = 250; int my = ty - mh;
+        if (x < 160 && y > my) {
+            if (rect_contains(34, my+10, 120, 24, x, y)) create_window(APP_BROWSER, "Nostalux Web", 450, 350);
+            else if (rect_contains(34, my+40, 120, 24, x, y)) create_window(APP_TERMINAL, "Terminal", 400, 300);
+            else if (rect_contains(34, my+70, 120, 24, x, y)) create_window(APP_FILES, "Files", 400, 300);
+            else if (rect_contains(34, my+100, 120, 24, x, y)) create_window(APP_TASKMGR, "Task Manager", 300, 300);
+            else if (rect_contains(34, my+130, 120, 24, x, y)) create_window(APP_NOTEPAD, "Notepad", 300, 200);
+            else if (rect_contains(34, my+160, 120, 24, x, y)) create_window(APP_CALC, "Calc", 220, 300);
+            else if (rect_contains(34, my+190, 120, 24, x, y)) create_window(APP_SETTINGS, "Settings", 250, 200);
+            else if (rect_contains(34, my+220, 120, 24, x, y)) syscall_shutdown();
             start_menu_open = false; return;
         }
         start_menu_open = false; 
@@ -853,14 +1066,14 @@ static void on_click(int x, int y) {
             if (rect_contains(w->x, w->y, w->w, w->h, x, y)) {
                 int idx = focus_window(i); w = windows[idx];
                 
-                int bx = w->x + w->w - 22;
-                if (rect_contains(bx, w->y+5, 16, 14, x, y)) { close_window(idx); return; }
+                int bx = w->x + w->w - 24;
+                if (rect_contains(bx, w->y+4, 18, 18, x, y)) { close_window(idx); return; }
                 
-                int mx = bx - 20;
-                if (rect_contains(mx, w->y+5, 16, 14, x, y)) { toggle_maximize(w); return; }
+                int mx = bx - 22;
+                if (rect_contains(mx, w->y+4, 18, 18, x, y)) { toggle_maximize(w); return; }
                 
-                int mn = mx - 20;
-                if (rect_contains(mn, w->y+5, 16, 14, x, y)) { w->minimized = true; return; }
+                int mn = mx - 22;
+                if (rect_contains(mn, w->y+4, 18, 18, x, y)) { w->minimized = true; return; }
 
                 if (y < w->y + WIN_CAPTION_H && !w->maximized) {
                     w->dragging = true;
@@ -870,6 +1083,8 @@ static void on_click(int x, int y) {
                 if (w->type == APP_CALC) handle_calc_logic(w, 0);
                 if (w->type == APP_SETTINGS) handle_settings_click(w, x, y);
                 if (w->type == APP_FILES) handle_files_click(w, x, y);
+                if (w->type == APP_BROWSER) handle_browser_click(w, x, y);
+                if (w->type == APP_TASKMGR) handle_taskmgr_click(w, x, y);
                 return;
             }
         }
@@ -879,12 +1094,14 @@ static void on_click(int x, int y) {
     if (rect_contains(20, 20, 60, 60, x, y)) create_window(APP_TERMINAL, "Terminal", 400, 300);
     else if (rect_contains(20, 90, 60, 60, x, y)) create_window(APP_FILES, "Files", 400, 300);
     else if (rect_contains(20, 160, 60, 60, x, y)) create_window(APP_NOTEPAD, "Notepad", 300, 200);
-    else if (rect_contains(20, 230, 60, 60, x, y)) create_window(APP_CALC, "Calc", 220, 300);
-    else if (rect_contains(20, 300, 60, 60, x, y)) create_window(APP_SETTINGS, "Settings", 250, 200);
+    else if (rect_contains(20, 230, 60, 60, x, y)) create_window(APP_BROWSER, "Browser", 450, 350);
+    else if (rect_contains(20, 300, 60, 60, x, y)) create_window(APP_CALC, "Calc", 220, 300);
+    else if (rect_contains(20, 370, 60, 60, x, y)) create_window(APP_TASKMGR, "Task Mgr", 300, 300);
+    else if (rect_contains(20, 440, 60, 60, x, y)) create_window(APP_SETTINGS, "Settings", 250, 200);
 }
 
 void gui_demo_run(void) {
-    syscall_log("GUI: Started (Classic Theme)");
+    syscall_log("GUI: Started (Nostalux Ocean Theme)");
     g_gui_running = true;
     graphics_enable_double_buffer();
     screen_w = graphics_get_width(); screen_h = graphics_get_height();
@@ -903,7 +1120,11 @@ void gui_demo_run(void) {
                 NotepadState* ns = &top->state.notepad;
                 if (c=='\b' && ns->length>0) ns->buffer[--ns->length]=0;
                 else if (c>=32 && c<=126 && ns->length<510) { ns->buffer[ns->length++]=c; ns->buffer[ns->length]=0; }
-            } else if (top->type == APP_TERMINAL) handle_terminal_input(top, c);
+            } else if (top->type == APP_TERMINAL) {
+                handle_terminal_input(top, c);
+            } else if (top->type == APP_BROWSER) {
+                handle_browser_input(top, c);
+            }
         }
 
         prev_mouse = mouse; syscall_get_mouse(&mouse);
