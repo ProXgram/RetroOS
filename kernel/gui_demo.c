@@ -103,9 +103,9 @@ typedef enum {
 typedef struct { int current_val; int accumulator; char op; bool new_entry; } CalcState;
 typedef struct { char buffer[512]; int length; } NotepadState;
 typedef struct { int selected_index; int scroll_offset; } FileManagerState;
-typedef struct { bool wallpaper_enabled; } SettingsState;
+typedef struct { bool wallpaper_enabled; int theme_id; } SettingsState;
 typedef struct { char prompt[16]; char input[64]; int input_len; char history[6][64]; } TerminalState;
-typedef struct { char url[64]; int url_len; char status[32]; } BrowserState;
+typedef struct { char url[64]; int url_len; char status[32]; int scroll; } BrowserState;
 typedef struct { int selected_pid; } TaskMgrState;
 typedef struct { uint32_t* canvas_buffer; int width; int height; uint32_t current_color; int brush_size; } PaintState;
 typedef struct { char cmd[32]; int len; } RunState;
@@ -177,6 +177,7 @@ static void draw_wallpaper(void);
 static void on_click(int x, int y);
 static void update_sysmon(Window* w);
 static void create_window(AppType type, const char* title, int w, int h);
+static Window* get_top_window(void);
 
 // Pseudo-random
 static unsigned long rand_state = 1234;
@@ -199,53 +200,327 @@ static void int_to_str(int v, char* buf) {
     int j=0; while(i>0)buf[j++]=t[--i]; buf[j]=0;
 }
 
+// --- BITMAPS (Icons) ---
+
+static const uint8_t CURSOR_BITMAP[19][12] = {
+    {1,1,0,0,0,0,0,0,0,0,0,0}, {1,2,1,0,0,0,0,0,0,0,0,0}, {1,2,2,1,0,0,0,0,0,0,0,0},
+    {1,2,2,2,1,0,0,0,0,0,0,0}, {1,2,2,2,2,1,0,0,0,0,0,0}, {1,2,2,2,2,2,1,0,0,0,0,0},
+    {1,2,2,2,2,2,2,1,0,0,0,0}, {1,2,2,2,2,2,2,2,1,0,0,0}, {1,2,2,2,2,2,2,2,2,1,0,0},
+    {1,2,2,2,2,2,2,2,2,2,1,0}, {1,2,2,2,2,2,1,1,1,1,1,1}, {1,2,2,2,2,2,1,0,0,0,0,0},
+    {1,2,1,1,2,2,1,0,0,0,0,0}, {1,1,0,1,2,2,1,0,0,0,0,0}, {0,0,0,0,1,2,2,1,0,0,0,0},
+    {0,0,0,0,1,2,2,1,0,0,0,0}, {0,0,0,0,0,1,2,2,1,0,0,0}, {0,0,0,0,0,1,2,2,1,0,0,0},
+    {0,0,0,0,0,0,1,1,0,0,0,0}
+};
+
+static const uint8_t ICON_TERM[24][24] = {
+    {1,1,1,1,1,1,1,1,1,1,1,1,1,1,1,1,1,1,1,1,1,1,1,1},
+    {1,3,3,3,3,3,3,3,3,3,3,3,3,3,3,3,3,3,3,3,3,3,3,1},
+    {1,1,1,1,1,1,1,1,1,1,1,1,1,1,1,1,1,1,1,1,1,1,1,1},
+    {1,1,7,7,1,1,1,1,1,1,1,1,1,1,1,1,1,1,1,1,1,1,1,1},
+    {1,1,1,7,7,1,1,1,1,1,1,1,1,1,1,1,1,1,1,1,1,1,1,1},
+    {1,1,1,1,7,7,1,1,1,1,1,1,1,1,1,1,1,1,1,1,1,1,1,1},
+    {1,1,1,1,1,7,7,1,1,1,1,1,1,1,1,1,1,1,1,1,1,1,1,1},
+    {1,1,1,1,7,7,1,1,1,1,1,1,1,1,1,1,1,1,1,1,1,1,1,1},
+    {1,1,1,7,7,1,1,1,1,1,1,1,1,1,1,1,1,1,1,1,1,1,1,1},
+    {1,1,7,7,1,1,1,1,1,1,1,1,1,1,1,1,1,1,1,1,1,1,1,1},
+    {1,1,1,1,1,1,1,1,1,1,1,1,1,1,1,1,1,1,1,1,1,1,1,1},
+    {1,1,1,1,1,1,1,1,1,1,1,1,1,1,1,1,1,1,1,1,1,1,1,1},
+    {1,1,1,1,1,1,1,1,1,1,1,1,1,1,1,1,7,7,7,7,7,1,1,1},
+    {1,1,1,1,1,1,1,1,1,1,1,1,1,1,1,1,7,7,7,7,7,1,1,1},
+    {1,1,1,1,1,1,1,1,1,1,1,1,1,1,1,1,1,1,1,1,1,1,1,1},
+    {1,1,1,1,1,1,1,1,1,1,1,1,1,1,1,1,1,1,1,1,1,1,1,1},
+    {1,1,1,1,1,1,1,1,1,1,1,1,1,1,1,1,1,1,1,1,1,1,1,1},
+    {1,1,1,1,1,1,1,1,1,1,1,1,1,1,1,1,1,1,1,1,1,1,1,1},
+    {1,1,1,1,1,1,1,1,1,1,1,1,1,1,1,1,1,1,1,1,1,1,1,1},
+    {1,1,1,1,1,1,1,1,1,1,1,1,1,1,1,1,1,1,1,1,1,1,1,1},
+    {1,1,1,1,1,1,1,1,1,1,1,1,1,1,1,1,1,1,1,1,1,1,1,1},
+    {1,1,1,1,1,1,1,1,1,1,1,1,1,1,1,1,1,1,1,1,1,1,1,1},
+    {1,1,1,1,1,1,1,1,1,1,1,1,1,1,1,1,1,1,1,1,1,1,1,1},
+    {1,1,1,1,1,1,1,1,1,1,1,1,1,1,1,1,1,1,1,1,1,1,1,1}
+};
+
+static const uint8_t ICON_PAINT[24][24] = {
+    {0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0},
+    {0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,4,4,0,0,0,0},
+    {0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,4,6,6,4,0,0,0},
+    {0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,4,6,6,6,6,4,0,0},
+    {0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,4,6,6,6,6,4,0,0,0},
+    {0,0,0,0,0,0,0,0,0,0,0,0,0,0,4,6,6,6,4,4,0,0,0,0},
+    {0,0,0,0,0,0,0,0,0,0,0,0,0,4,6,6,4,4,0,0,0,0,0,0},
+    {0,0,0,0,0,0,0,0,0,0,0,0,4,6,4,4,0,0,0,0,0,0,0,0},
+    {0,0,0,0,0,0,0,0,0,0,0,4,4,4,0,0,0,0,0,0,0,0,0,0},
+    {0,0,0,0,0,0,0,0,0,0,4,4,0,0,0,0,0,0,0,0,0,0,0,0},
+    {0,0,0,0,0,0,0,0,0,4,0,0,0,0,0,0,0,0,0,0,0,0,0,0},
+    {0,0,0,0,0,0,0,0,1,1,1,0,0,0,0,0,0,0,0,0,0,0,0,0},
+    {0,0,0,0,0,0,0,1,5,5,5,1,0,0,0,0,0,0,0,0,0,0,0,0},
+    {0,0,0,0,0,0,1,5,5,5,5,5,1,0,0,0,0,0,0,0,0,0,0,0},
+    {0,0,0,0,0,1,5,5,5,5,5,5,5,1,0,0,0,0,0,0,0,0,0,0},
+    {0,0,0,0,1,5,5,5,5,5,5,5,5,5,1,0,0,0,0,0,0,0,0,0},
+    {0,0,0,1,5,5,5,5,5,5,5,5,5,5,5,1,0,0,0,0,0,0,0,0},
+    {0,0,1,5,5,5,5,5,5,5,5,5,5,5,5,5,1,0,0,0,0,0,0,0},
+    {0,0,1,5,5,5,5,5,5,5,5,5,5,5,5,5,1,0,0,0,0,0,0,0},
+    {0,0,1,5,5,5,5,5,5,5,5,5,5,5,5,5,1,0,0,0,0,0,0,0},
+    {0,0,0,1,5,5,5,5,5,5,5,5,5,5,5,1,0,0,0,0,0,0,0,0},
+    {0,0,0,0,1,1,1,1,1,1,1,1,1,1,1,0,0,0,0,0,0,0,0,0},
+    {0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0},
+    {0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0}
+};
+
+static const uint8_t ICON_BROWSER[24][24] = {
+    {0,0,0,0,0,0,0,6,6,6,6,6,6,6,0,0,0,0,0,0,0,0,0,0},
+    {0,0,0,0,0,6,6,6,6,6,6,6,6,6,6,6,0,0,0,0,0,0,0,0},
+    {0,0,0,0,6,6,6,6,6,6,4,4,6,6,6,6,6,0,0,0,0,0,0,0},
+    {0,0,0,6,6,6,6,6,4,4,4,4,4,4,6,6,6,6,0,0,0,0,0,0},
+    {0,0,6,6,6,6,6,4,4,4,4,4,4,4,4,6,6,6,6,0,0,0,0,0},
+    {0,0,6,6,6,6,4,4,4,4,4,4,4,4,4,4,6,6,6,0,0,0,0,0},
+    {0,6,6,6,6,4,4,4,4,4,4,4,4,4,4,4,4,6,6,6,0,0,0,0},
+    {0,6,6,6,4,4,4,4,6,6,6,6,6,6,4,4,4,4,6,6,0,0,0,0},
+    {6,6,6,4,4,4,6,6,6,6,6,6,6,6,6,6,4,4,4,6,6,0,0,0},
+    {6,6,6,4,4,6,6,6,6,6,6,6,6,6,6,6,6,4,4,6,6,0,0,0},
+    {6,6,6,4,6,6,6,6,6,6,6,6,6,6,6,6,6,6,4,6,6,0,0,0},
+    {6,6,6,4,6,6,6,6,6,6,6,6,6,6,6,6,6,6,4,6,6,0,0,0},
+    {6,6,6,4,6,6,6,6,6,6,6,6,6,6,6,6,6,6,4,6,6,0,0,0},
+    {6,6,6,4,4,6,6,6,6,6,6,6,6,6,6,6,6,4,4,6,6,0,0,0},
+    {6,6,6,4,4,4,6,6,6,6,6,6,6,6,6,6,4,4,4,6,6,0,0,0},
+    {0,6,6,6,4,4,4,4,6,6,6,6,6,6,4,4,4,4,6,6,0,0,0,0},
+    {0,6,6,6,6,4,4,4,4,4,4,4,4,4,4,4,4,6,6,6,0,0,0,0},
+    {0,0,6,6,6,6,4,4,4,4,4,4,4,4,4,4,6,6,6,0,0,0,0,0},
+    {0,0,6,6,6,6,6,4,4,4,4,4,4,4,4,6,6,6,6,0,0,0,0,0},
+    {0,0,0,6,6,6,6,6,4,4,4,4,4,4,6,6,6,6,0,0,0,0,0,0},
+    {0,0,0,0,6,6,6,6,6,6,4,4,6,6,6,6,6,0,0,0,0,0,0,0},
+    {0,0,0,0,0,6,6,6,6,6,6,6,6,6,6,6,0,0,0,0,0,0,0,0},
+    {0,0,0,0,0,0,0,6,6,6,6,6,6,6,0,0,0,0,0,0,0,0,0,0},
+    {0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0}
+};
+
+static const uint8_t ICON_TASKMGR[24][24] = {
+    {1,1,1,1,1,1,1,1,1,1,1,1,1,1,1,1,1,1,1,1,1,1,1,1},
+    {1,2,2,2,2,2,2,2,2,2,2,2,2,2,2,2,2,2,2,2,2,2,2,1},
+    {1,2,1,1,1,1,1,1,1,1,1,1,1,1,1,1,1,1,1,1,1,1,2,1},
+    {1,2,1,1,1,1,1,1,1,1,1,1,1,1,1,1,1,1,1,1,1,1,2,1},
+    {1,2,1,1,1,1,1,1,1,1,1,1,1,1,1,1,1,1,1,1,1,1,2,1},
+    {1,2,1,1,1,1,1,1,1,1,1,1,1,1,1,1,1,1,7,1,1,1,2,1},
+    {1,2,1,1,1,1,1,1,1,1,1,1,1,1,1,7,7,7,7,1,1,1,2,1},
+    {1,2,1,1,1,1,1,1,1,1,1,1,1,1,7,7,1,1,1,1,1,1,2,1},
+    {1,2,1,1,1,1,1,1,1,1,1,1,1,7,7,1,1,1,1,1,1,1,2,1},
+    {1,2,1,1,1,1,1,1,1,1,1,1,1,7,1,1,1,1,1,1,1,1,2,1},
+    {1,2,1,1,1,1,1,1,1,1,1,1,7,7,1,1,1,1,1,1,1,1,2,1},
+    {1,2,1,1,1,1,1,1,1,1,1,1,7,1,1,1,1,1,1,1,1,1,2,1},
+    {1,2,1,1,1,1,1,1,1,1,7,7,7,1,1,1,1,1,1,1,1,1,2,1},
+    {1,2,1,1,1,1,1,1,1,7,7,1,1,1,1,1,1,1,1,1,1,1,2,1},
+    {1,2,1,1,1,1,1,1,1,7,1,1,1,1,1,1,1,1,1,1,1,1,2,1},
+    {1,2,1,1,1,1,1,7,7,7,1,1,1,1,1,1,1,1,1,1,1,1,2,1},
+    {1,2,1,1,1,1,7,7,1,1,1,1,1,1,1,1,1,1,1,1,1,1,2,1},
+    {1,2,1,1,1,1,7,1,1,1,1,1,1,1,1,1,1,1,1,1,1,1,2,1},
+    {1,2,1,1,7,7,7,1,1,1,1,1,1,1,1,1,1,1,1,1,1,1,2,1},
+    {1,2,1,7,7,1,1,1,1,1,1,1,1,1,1,1,1,1,1,1,1,1,2,1},
+    {1,2,1,7,1,1,1,1,1,1,1,1,1,1,1,1,1,1,1,1,1,1,2,1},
+    {1,2,1,1,1,1,1,1,1,1,1,1,1,1,1,1,1,1,1,1,1,1,2,1},
+    {1,2,2,2,2,2,2,2,2,2,2,2,2,2,2,2,2,2,2,2,2,2,2,1},
+    {1,1,1,1,1,1,1,1,1,1,1,1,1,1,1,1,1,1,1,1,1,1,1,1}
+};
+
+static const uint8_t ICON_FOLDER[24][24] = {
+    {0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0},
+    {0,0,1,1,1,1,1,1,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0},
+    {0,1,5,5,5,5,5,5,1,1,1,1,1,1,1,1,1,1,1,1,1,1,0,0},
+    {1,5,5,5,5,5,5,5,5,5,5,5,5,5,5,5,5,5,5,5,5,5,1,0},
+    {1,5,5,5,5,5,5,5,5,5,5,5,5,5,5,5,5,5,5,5,5,5,1,0},
+    {1,5,5,5,5,5,5,5,5,5,5,5,5,5,5,5,5,5,5,5,5,5,1,0},
+    {1,1,1,1,1,1,1,1,1,1,1,1,1,1,1,1,1,1,1,1,1,1,1,0},
+    {1,5,5,5,5,5,5,5,5,5,5,5,5,5,5,5,5,5,5,5,5,5,1,0},
+    {1,5,5,5,5,5,5,5,5,5,5,5,5,5,5,5,5,5,5,5,5,5,1,0},
+    {1,5,5,5,5,5,5,5,5,5,5,5,5,5,5,5,5,5,5,5,5,5,1,0},
+    {1,5,5,5,5,5,5,5,5,5,5,5,5,5,5,5,5,5,5,5,5,5,1,0},
+    {1,5,5,5,5,5,5,5,5,5,5,5,5,5,5,5,5,5,5,5,5,5,1,0},
+    {1,5,5,5,5,5,5,5,5,5,5,5,5,5,5,5,5,5,5,5,5,5,1,0},
+    {1,5,5,5,5,5,5,5,5,5,5,5,5,5,5,5,5,5,5,5,5,5,1,0},
+    {1,5,5,5,5,5,5,5,5,5,5,5,5,5,5,5,5,5,5,5,5,5,1,0},
+    {1,5,5,5,5,5,5,5,5,5,5,5,5,5,5,5,5,5,5,5,5,5,1,0},
+    {1,5,5,5,5,5,5,5,5,5,5,5,5,5,5,5,5,5,5,5,5,5,1,0},
+    {1,5,5,5,5,5,5,5,5,5,5,5,5,5,5,5,5,5,5,5,5,5,1,0},
+    {1,5,5,5,5,5,5,5,5,5,5,5,5,5,5,5,5,5,5,5,5,5,1,0},
+    {1,5,5,5,5,5,5,5,5,5,5,5,5,5,5,5,5,5,5,5,5,5,1,0},
+    {1,5,5,5,5,5,5,5,5,5,5,5,5,5,5,5,5,5,5,5,5,5,1,0},
+    {1,5,5,5,5,5,5,5,5,5,5,5,5,5,5,5,5,5,5,5,5,5,1,0},
+    {1,5,5,5,5,5,5,5,5,5,5,5,5,5,5,5,5,5,5,5,5,5,1,0},
+    {1,1,1,1,1,1,1,1,1,1,1,1,1,1,1,1,1,1,1,1,1,1,1,0}
+};
+
+static const uint8_t ICON_NOTE[24][24] = {
+    {0,0,0,1,1,1,1,1,1,1,1,1,1,1,1,1,0,0,0,0,0,0,0,0},
+    {0,0,0,1,4,4,4,4,4,4,4,4,4,4,4,1,1,1,0,0,0,0,0,0},
+    {0,0,0,1,4,4,4,4,4,4,4,4,4,4,4,4,4,1,0,0,0,0,0,0},
+    {0,0,0,1,4,6,6,6,6,6,6,6,6,4,4,4,4,1,0,0,0,0,0,0},
+    {0,0,0,1,4,4,4,4,4,4,4,4,4,4,4,4,4,1,0,0,0,0,0,0},
+    {0,0,0,1,4,1,1,1,1,1,1,1,1,4,4,4,4,1,0,0,0,0,0,0},
+    {0,0,0,1,4,4,4,4,4,4,4,4,4,4,4,4,4,1,0,0,0,0,0,0},
+    {0,0,0,1,4,1,1,1,1,1,1,1,1,4,4,4,4,1,0,0,0,0,0,0},
+    {0,0,0,1,4,4,4,4,4,4,4,4,4,4,4,4,4,1,0,0,0,0,0,0},
+    {0,0,0,1,4,1,1,1,1,1,1,1,1,4,4,4,4,1,0,0,0,0,0,0},
+    {0,0,0,1,4,4,4,4,4,4,4,4,4,4,4,4,4,1,0,0,0,0,0,0},
+    {0,0,0,1,4,1,1,1,1,1,1,1,1,4,4,4,4,1,0,0,0,0,0,0},
+    {0,0,0,1,4,4,4,4,4,4,4,4,4,4,4,4,4,1,0,0,0,0,0,0},
+    {0,0,0,1,4,1,1,1,1,1,1,1,1,4,4,4,4,1,0,0,0,0,0,0},
+    {0,0,0,1,4,4,4,4,4,4,4,4,4,4,4,4,4,1,0,0,0,0,0,0},
+    {0,0,0,1,4,1,1,1,1,1,1,1,1,4,4,4,4,1,0,0,0,0,0,0},
+    {0,0,0,1,4,4,4,4,4,4,4,4,4,4,4,4,4,1,0,0,0,0,0,0},
+    {0,0,0,1,4,1,1,1,1,1,1,1,1,4,4,4,4,1,0,0,0,0,0,0},
+    {0,0,0,1,4,4,4,4,4,4,4,4,4,4,4,4,4,1,0,0,0,0,0,0},
+    {0,0,0,1,4,4,4,4,4,4,4,4,4,4,4,4,4,1,0,0,0,0,0,0},
+    {0,0,0,1,4,4,4,4,4,4,4,4,4,4,4,4,4,1,0,0,0,0,0,0},
+    {0,0,0,1,4,4,4,4,4,4,4,4,4,4,4,4,4,1,0,0,0,0,0,0},
+    {0,0,0,1,1,1,1,1,1,1,1,1,1,1,1,1,1,1,0,0,0,0,0,0},
+    {0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0}
+};
+
+static const uint8_t ICON_CALC[24][24] = {
+    {1,1,1,1,1,1,1,1,1,1,1,1,1,1,1,1,1,1,1,1,1,0,0,0},
+    {1,3,3,3,3,3,3,3,3,3,3,3,3,3,3,3,3,3,3,3,1,0,0,0},
+    {1,3,1,1,1,1,1,1,1,1,1,1,1,1,1,1,1,1,1,3,1,0,0,0},
+    {1,3,1,7,7,7,7,7,7,7,7,7,7,7,7,7,7,7,1,3,1,0,0,0},
+    {1,3,1,1,1,1,1,1,1,1,1,1,1,1,1,1,1,1,1,3,1,0,0,0},
+    {1,3,3,3,3,3,3,3,3,3,3,3,3,3,3,3,3,3,3,3,1,0,0,0},
+    {1,3,1,1,1,3,1,1,1,3,1,1,1,3,1,1,1,3,3,3,1,0,0,0},
+    {1,3,1,4,1,3,1,4,1,3,1,4,1,3,1,8,1,3,3,3,1,0,0,0},
+    {1,3,1,1,1,3,1,1,1,3,1,1,1,3,1,1,1,3,3,3,1,0,0,0},
+    {1,3,3,3,3,3,3,3,3,3,3,3,3,3,3,3,3,3,3,3,1,0,0,0},
+    {1,3,1,1,1,3,1,1,1,3,1,1,1,3,1,1,1,3,3,3,1,0,0,0},
+    {1,3,1,4,1,3,1,4,1,3,1,4,1,3,1,4,1,3,3,3,1,0,0,0},
+    {1,3,1,1,1,3,1,1,1,3,1,1,1,3,1,1,1,3,3,3,1,0,0,0},
+    {1,3,3,3,3,3,3,3,3,3,3,3,3,3,3,3,3,3,3,3,1,0,0,0},
+    {1,3,1,1,1,3,1,1,1,3,1,1,1,3,1,1,1,3,3,3,1,0,0,0},
+    {1,3,1,4,1,3,1,4,1,3,1,4,1,3,1,4,1,3,3,3,1,0,0,0},
+    {1,3,1,1,1,3,1,1,1,3,1,1,1,3,1,1,1,3,3,3,1,0,0,0},
+    {1,3,3,3,3,3,3,3,3,3,3,3,3,3,3,3,3,3,3,3,1,0,0,0},
+    {1,3,1,1,1,1,1,1,1,3,1,1,1,3,1,1,1,3,3,3,1,0,0,0},
+    {1,3,1,4,4,4,4,4,1,3,1,4,1,3,1,4,1,3,3,3,1,0,0,0},
+    {1,3,1,1,1,1,1,1,1,3,1,1,1,3,1,1,1,3,3,3,1,0,0,0},
+    {1,3,3,3,3,3,3,3,3,3,3,3,3,3,3,3,3,3,3,3,1,0,0,0},
+    {1,1,1,1,1,1,1,1,1,1,1,1,1,1,1,1,1,1,1,1,1,0,0,0},
+    {0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0}
+};
+
+static const uint8_t ICON_SET[24][24] = {
+    {0,0,0,0,0,0,0,0,0,2,2,2,2,2,0,0,0,0,0,0,0,0,0,0},
+    {0,0,0,0,0,0,0,0,0,2,3,3,3,2,0,0,0,0,0,0,0,0,0,0},
+    {0,0,0,0,2,2,0,0,0,2,3,3,3,2,0,0,0,2,2,0,0,0,0,0},
+    {0,0,0,2,3,2,0,0,2,2,3,3,3,2,2,0,0,2,3,2,0,0,0,0},
+    {0,0,0,2,3,2,2,2,3,3,3,3,3,3,3,2,2,2,3,2,0,0,0,0},
+    {0,0,0,0,2,3,3,3,3,3,3,3,3,3,3,3,3,3,2,0,0,0,0,0},
+    {0,0,0,0,0,2,3,3,3,1,1,1,1,1,3,3,3,2,0,0,0,0,0,0},
+    {0,0,0,0,0,2,3,3,1,4,4,4,4,4,1,3,3,2,0,0,0,0,0,0},
+    {0,0,2,2,2,3,3,3,1,4,4,4,4,4,1,3,3,3,2,2,2,0,0,0},
+    {0,2,3,3,3,3,3,3,1,4,4,4,4,4,1,3,3,3,3,3,3,2,0,0},
+    {0,2,3,3,3,3,3,3,1,4,4,4,4,4,1,3,3,3,3,3,3,2,0,0},
+    {0,2,3,3,3,3,3,3,1,4,4,4,4,4,1,3,3,3,3,3,3,2,0,0},
+    {0,2,3,3,3,3,3,3,1,4,4,4,4,4,1,3,3,3,3,3,3,2,0,0},
+    {0,2,3,3,3,3,3,3,1,4,4,4,4,4,1,3,3,3,3,3,3,2,0,0},
+    {0,0,2,2,2,3,3,3,1,4,4,4,4,4,1,3,3,3,2,2,2,0,0,0},
+    {0,0,0,0,0,2,3,3,1,4,4,4,4,4,1,3,3,2,0,0,0,0,0,0},
+    {0,0,0,0,0,2,3,3,3,1,1,1,1,1,3,3,3,2,0,0,0,0,0,0},
+    {0,0,0,0,2,3,3,3,3,3,3,3,3,3,3,3,3,3,2,0,0,0,0,0},
+    {0,0,0,2,3,2,2,2,3,3,3,3,3,3,3,2,2,2,3,2,0,0,0,0},
+    {0,0,0,2,3,2,0,0,2,2,3,3,3,2,2,0,0,2,3,2,0,0,0,0},
+    {0,0,0,0,2,2,0,0,0,2,3,3,3,2,0,0,0,2,2,0,0,0,0,0},
+    {0,0,0,0,0,0,0,0,0,2,3,3,3,2,0,0,0,0,0,0,0,0,0,0},
+    {0,0,0,0,0,0,0,0,0,2,2,2,2,2,0,0,0,0,0,0,0,0,0,0},
+    {0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0}
+};
+
+static const uint8_t ICON_TRASH[24][24] = {
+    {0,0,0,0,0,0,0,1,1,1,1,1,0,0,0,0,0,0,0,0,0,0,0,0},
+    {0,0,0,0,0,1,1,4,4,3,4,4,1,1,0,0,0,0,0,0,0,0,0,0},
+    {0,0,0,0,1,4,4,3,3,3,4,3,4,4,1,0,0,0,0,0,0,0,0,0},
+    {0,0,0,1,4,3,3,4,4,3,3,4,3,3,4,1,0,0,0,0,0,0,0,0}, 
+    {0,0,1,1,1,1,1,1,1,1,1,1,1,1,1,1,1,0,0,0,0,0,0,0}, 
+    {0,1,6,6,6,6,6,6,6,6,6,6,6,6,6,6,6,1,0,0,0,0,0,0}, 
+    {0,1,1,1,1,1,1,1,1,1,1,1,1,1,1,1,1,1,0,0,0,0,0,0}, 
+    {0,0,1,1,1,1,1,1,1,1,1,1,1,1,1,1,1,0,0,0,0,0,0,0}, 
+    {0,0,1,1,1,1,1,1,1,1,1,1,1,1,1,1,1,0,0,0,0,0,0,0},
+    {0,0,1,1,1,1,1,1,4,4,1,1,1,1,1,1,1,0,0,0,0,0,0,0}, 
+    {0,0,1,1,1,1,1,4,1,1,4,1,1,1,1,1,1,0,0,0,0,0,0,0},
+    {0,0,1,1,1,1,1,1,1,4,1,1,1,1,1,1,1,0,0,0,0,0,0,0},
+    {0,0,1,1,1,1,1,1,4,1,4,1,1,1,1,1,1,0,0,0,0,0,0,0},
+    {0,0,1,1,1,1,1,4,4,4,4,4,1,1,1,1,1,0,0,0,0,0,0,0},
+    {0,0,1,1,1,1,1,1,1,4,1,1,1,1,1,1,1,0,0,0,0,0,0,0},
+    {0,0,1,1,1,1,1,1,4,1,4,1,1,1,1,1,1,0,0,0,0,0,0,0},
+    {0,0,1,1,1,1,1,4,1,1,1,4,1,1,1,1,1,0,0,0,0,0,0,0},
+    {0,0,1,1,1,1,1,1,1,1,1,1,1,1,1,1,1,0,0,0,0,0,0,0},
+    {0,0,1,1,1,1,1,1,1,1,1,1,1,1,1,1,1,0,0,0,0,0,0,0},
+    {0,0,1,1,1,1,1,1,1,1,1,1,1,1,1,1,1,0,0,0,0,0,0,0},
+    {0,0,1,1,1,1,1,1,1,1,1,1,1,1,1,1,1,0,0,0,0,0,0,0},
+    {0,0,1,1,1,1,1,1,1,1,1,1,1,1,1,1,1,0,0,0,0,0,0,0},
+    {0,0,0,1,1,1,1,1,1,1,1,1,1,1,1,1,1,0,0,0,0,0,0,0},
+    {0,0,0,1,1,1,1,1,1,1,1,1,1,1,1,1,1,0,0,0,0,0,0,0}
+};
+
 // --- Window Management ---
+
 static void close_window(int index) {
     if (index < 0 || index >= MAX_WINDOWS || windows[index] == NULL) return;
-    if (windows[index]->type == APP_PAINT && windows[index]->state.paint.canvas_buffer)
-        syscall_free(windows[index]->state.paint.canvas_buffer);
-    syscall_free(windows[index]);
+    Window* w = windows[index];
+    
+    if (w->type == APP_PAINT && w->state.paint.canvas_buffer) {
+        syscall_free(w->state.paint.canvas_buffer);
+    }
+    
+    syscall_free(w);
     windows[index] = NULL;
+    
+    for (int i = index; i < MAX_WINDOWS - 1; i++) {
+        windows[i] = windows[i+1];
+        if (windows[i]) windows[i]->id = i; 
+    }
+    windows[MAX_WINDOWS - 1] = NULL;
 }
 
 static int focus_window(int index) {
     if (index < 0 || index >= MAX_WINDOWS || windows[index] == NULL) return -1;
-    Window* t = windows[index];
-    for(int i=index; i<MAX_WINDOWS-1; i++) {
+    Window* target = windows[index];
+    
+    for (int i = index; i < MAX_WINDOWS - 1; i++) {
         windows[i] = windows[i+1];
-        if(windows[i]) windows[i]->id = i;
+        if (windows[i]) windows[i]->id = i;
     }
-    int top = MAX_WINDOWS-1;
-    while(top>0 && windows[top]==NULL) top--;
-    top = 0; while(top < MAX_WINDOWS && windows[top] != NULL) top++;
-    if (top > 0) top--; 
-    windows[top] = t; t->id = top;
-    for(int i=0; i<MAX_WINDOWS; i++) if(windows[i]) {
-        windows[i]->focused = (windows[i] == t);
-        if(windows[i]->focused) windows[i]->minimized = false;
+    windows[MAX_WINDOWS - 1] = NULL;
+    
+    int top_slot = 0;
+    while (top_slot < MAX_WINDOWS && windows[top_slot] != NULL) top_slot++;
+    if (top_slot >= MAX_WINDOWS) top_slot = MAX_WINDOWS - 1;
+
+    windows[top_slot] = target; 
+    target->id = top_slot;
+
+    for(int j=0; j<MAX_WINDOWS; j++) {
+        if(windows[j]) {
+            windows[j]->focused = (windows[j] == target);
+            if (windows[j]->focused) windows[j]->minimized = false;
+        }
     }
-    return top;
+    return target->id;
 }
 
 static Window* get_top_window(void) {
-    for(int i=MAX_WINDOWS-1; i>=0; i--) {
-        if(windows[i] && windows[i]->visible) return windows[i];
-    }
+    for (int i = MAX_WINDOWS - 1; i >= 0; i--) { 
+        if (windows[i] != NULL && windows[i]->visible) return windows[i]; 
+    } 
     return NULL;
 }
 
 static void create_window(AppType type, const char* title, int w, int h) {
     int slot = -1;
-    for(int i=0; i<MAX_WINDOWS; i++) if(!windows[i]) { slot=i; break; }
-    if(slot == -1) { close_window(0); slot=MAX_WINDOWS-1; while(slot>0 && windows[slot]) slot--; }
+    for (int i = 0; i < MAX_WINDOWS; i++) { if (windows[i] == NULL) { slot = i; break; } }
+    if (slot == -1) { close_window(0); slot = MAX_WINDOWS - 1; while(slot>0 && windows[slot]) slot--; }
 
     Window* win = (Window*)syscall_malloc(sizeof(Window));
-    if(!win) return;
-    
+    if (!win) return;
+
     win->id = slot; win->type = type; str_copy(win->title, title);
     win->w = w; win->h = h; win->min_w = 150; win->min_h = 100;
     win->x = 40+(slot*20); win->y = 40+(slot*20);
-    if(win->x+w > screen_w) win->x=20; if(win->y+h > screen_h-TASKBAR_H) win->y=20;
+    if(win->x+w > screen_w) win->x=20; 
+    if(win->y+h > screen_h-TASKBAR_H) win->y=20;
     
     win->visible = true; win->focused = true;
     win->minimized = false; win->maximized = false;
@@ -299,7 +574,7 @@ static void create_window(AppType type, const char* title, int w, int h) {
     focus_window(slot);
 }
 
-// --- Logic Implementation ---
+// --- Logic ---
 
 static void toggle_maximize(Window* w) {
     if (w->maximized) { 
@@ -311,6 +586,92 @@ static void toggle_maximize(Window* w) {
         w->restore_w = w->w; w->restore_h = w->h; 
         w->x = 0; w->y = 0; w->w = screen_w; w->h = screen_h - TASKBAR_H; 
         w->maximized = true; 
+    }
+}
+
+static void handle_minesweeper(Window* w, int rx, int ry, bool right_click) {
+    MineState* ms = &w->state.mine;
+    if (ms->game_over) {
+        create_window(APP_MINESWEEPER, "Minesweeper", 220, 260);
+        close_window(w->id);
+        return;
+    }
+    
+    int grid_x = (w->w - (10*20)) / 2;
+    int grid_y = 40;
+    if (rx < grid_x || rx >= grid_x + 200 || ry < grid_y || ry >= grid_y + 200) return;
+    
+    int c = (rx - grid_x) / 20;
+    int r = (ry - grid_y) / 20;
+    
+    if (right_click) {
+        if (ms->view[r][c] == 0) { ms->view[r][c] = 2; ms->flags_placed++; }
+        else if (ms->view[r][c] == 2) { ms->view[r][c] = 0; ms->flags_placed--; }
+    } else {
+        if (ms->view[r][c] == 0) {
+            ms->view[r][c] = 1;
+            if (ms->grid[r][c] == 9) {
+                ms->game_over = true; ms->victory = false;
+            } else if (ms->grid[r][c] == 0) {
+                for(int rr=r-1; rr<=r+1; rr++) for(int cc=c-1; cc<=c+1; cc++)
+                    if(rr>=0&&rr<10&&cc>=0&&cc<10 && ms->view[rr][cc]==0) ms->view[rr][cc]=1;
+            }
+        }
+    }
+}
+
+static void handle_run_command(Window* w) {
+    const char* cmd = w->state.run.cmd;
+    if (kstrcmp(cmd, "calc") == 0) create_window(APP_CALC, "Calculator", 220, 300);
+    else if (kstrcmp(cmd, "term") == 0) create_window(APP_TERMINAL, "Terminal", 400, 300);
+    else if (kstrcmp(cmd, "paint") == 0) create_window(APP_PAINT, "Paint", 500, 400);
+    else if (kstrcmp(cmd, "sys") == 0) create_window(APP_SYSMON, "System Monitor", 300, 200);
+    else if (kstrcmp(cmd, "mine") == 0) create_window(APP_MINESWEEPER, "Minesweeper", 220, 260);
+    else if (kstrcmp(cmd, "browser") == 0) create_window(APP_BROWSER, "Browser", 500, 400);
+    else if (kstrcmp(cmd, "exit") == 0) syscall_shutdown();
+    close_window(w->id);
+}
+
+static void handle_paint_click(Window* w, int x, int y) {
+    if (!w->state.paint.canvas_buffer) return;
+    
+    int cx = w->x + 6;
+    int cy = w->y + WIN_CAPTION_H + 46;
+    
+    if (y < cy) {
+        int palette_y = w->y + WIN_CAPTION_H + 11;
+        if (y >= palette_y && y < palette_y + 25) {
+            int local_x = x - (cx + 5);
+            if (local_x >= 0) {
+                int idx = local_x / 30;
+                if (idx >= 0 && idx < 8) {
+                    uint32_t colors[] = {0xFF000000, 0xFFFFFFFF, 0xFFFF0000, 0xFF00FF00, 0xFF0000FF, 0xFFFFFF00, 0xFFFF00FF, 0xFF00FFFF};
+                    w->state.paint.current_color = colors[idx];
+                }
+            }
+        }
+        return;
+    }
+    
+    int rel_x = x - cx;
+    int rel_y = y - cy;
+    int cw = w->state.paint.width;
+    int ch = w->state.paint.height;
+    
+    if (rel_x >= 0 && rel_x < cw && rel_y >= 0 && rel_y < ch) {
+        int sz = w->state.paint.brush_size;
+        uint32_t col = w->state.paint.current_color;
+        uint32_t* buf = w->state.paint.canvas_buffer;
+        
+        for(int dy=-sz; dy<=sz; dy++) {
+            for(int dx=-sz; dx<=sz; dx++) {
+                int px = rel_x + dx;
+                int py = rel_y + dy;
+                if (px >= 0 && px < cw && py >= 0 && py < ch) {
+                    buf[py * cw + px] = col;
+                }
+            }
+        }
     }
 }
 
@@ -368,7 +729,7 @@ static void handle_browser_click(Window* w, int x, int y) {
 }
 
 static void handle_calc_logic(Window* w, char key) {
-    (void)key; // Mouse click logic only for now
+    (void)key; // Unused for mouse logic
     int cx = w->x + 14; 
     int cy = w->y + WIN_CAPTION_H + 54;
     const char* btns = "789/456*123-C0=+";
@@ -431,82 +792,6 @@ static void handle_browser_input(Window* w, char c) {
     }
 }
 
-static void handle_minesweeper(Window* w, int rx, int ry, bool right_click) {
-    MineState* ms = &w->state.mine;
-    if (ms->game_over) {
-        create_window(APP_MINESWEEPER, "Minesweeper", 220, 260);
-        close_window(w->id);
-        return;
-    }
-    
-    int grid_x = (w->w - (10*20)) / 2;
-    int grid_y = 40;
-    if (rx < grid_x || rx >= grid_x + 200 || ry < grid_y || ry >= grid_y + 200) return;
-    
-    int c = (rx - grid_x) / 20;
-    int r = (ry - grid_y) / 20;
-    
-    if (right_click) {
-        if (ms->view[r][c] == 0) { ms->view[r][c] = 2; ms->flags_placed++; }
-        else if (ms->view[r][c] == 2) { ms->view[r][c] = 0; ms->flags_placed--; }
-    } else {
-        if (ms->view[r][c] == 0) {
-            ms->view[r][c] = 1;
-            if (ms->grid[r][c] == 9) {
-                ms->game_over = true; ms->victory = false;
-            } else if (ms->grid[r][c] == 0) {
-                for(int rr=r-1; rr<=r+1; rr++) for(int cc=c-1; cc<=c+1; cc++)
-                    if(rr>=0&&rr<10&&cc>=0&&cc<10 && ms->view[rr][cc]==0) ms->view[rr][cc]=1;
-            }
-        }
-    }
-}
-
-static void handle_run_command(Window* w) {
-    const char* cmd = w->state.run.cmd;
-    if (kstrcmp(cmd, "calc") == 0) create_window(APP_CALC, "Calculator", 220, 300);
-    else if (kstrcmp(cmd, "term") == 0) create_window(APP_TERMINAL, "Terminal", 400, 300);
-    else if (kstrcmp(cmd, "paint") == 0) create_window(APP_PAINT, "Paint", 500, 400);
-    else if (kstrcmp(cmd, "sys") == 0) create_window(APP_SYSMON, "System Monitor", 300, 200);
-    else if (kstrcmp(cmd, "mine") == 0) create_window(APP_MINESWEEPER, "Minesweeper", 220, 260);
-    else if (kstrcmp(cmd, "browser") == 0) create_window(APP_BROWSER, "Browser", 500, 400);
-    else if (kstrcmp(cmd, "exit") == 0) syscall_shutdown();
-    close_window(w->id);
-}
-
-static void handle_paint_click(Window* w, int x, int y) {
-    // Paint Palette Check
-    int rel_x = x - (w->x+6);
-    int rel_y = y - (w->y+WIN_CAPTION_H+6);
-    
-    if (rel_y < 40) { // Toolbar area
-        if (rel_y >= 5 && rel_y < 30) {
-            int col_idx = (rel_x - 5) / 30;
-            uint32_t p[] = {0xFF000000, 0xFFFFFFFF, 0xFFFF0000, 0xFF00FF00, 0xFF0000FF, 0xFFFFFF00, 0xFFFF00FF, 0xFF00FFFF};
-            if (col_idx >= 0 && col_idx < 8) w->state.paint.current_color = p[col_idx];
-        }
-        return;
-    }
-    
-    // Canvas Draw (Dot)
-    int cv_y = 40;
-    if (w->state.paint.canvas_buffer && rel_x >= 0 && rel_x < w->state.paint.width && rel_y >= cv_y) {
-        // Draw simplified dot
-        int draw_y = rel_y - cv_y;
-        int w_width = w->state.paint.width;
-        int sz = w->state.paint.brush_size;
-        for(int dy=-sz; dy<=sz; dy++) {
-            for(int dx=-sz; dx<=sz; dx++) {
-                int px = rel_x + dx;
-                int py = draw_y + dy;
-                if (px >= 0 && px < w_width && py >= 0 && py < w->state.paint.height) {
-                    w->state.paint.canvas_buffer[py * w_width + px] = w->state.paint.current_color;
-                }
-            }
-        }
-    }
-}
-
 static void update_sysmon(Window* w) {
     SysMonState* s = &w->state.sysmon;
     s->update_tick++;
@@ -537,189 +822,12 @@ static void draw_bevel_box(int x, int y, int w, int h, bool sunk) {
     graphics_fill_rect(x+w-1, y, 1, h, br);
 }
 
-static void render_window(Window* w) {
-    Theme* t = &themes[current_theme_idx];
-    
-    if (!w->maximized) graphics_fill_rect_alpha(w->x+6, w->y+6, w->w, w->h, 0x000000, 60);
-
-    if (t->is_glass) {
-        graphics_fill_rect_alpha(w->x-2, w->y-2, w->w+4, w->h+4, t->win_border, 100);
-        graphics_fill_rect(w->x, w->y, w->w, w->h, t->win_body);
-    } else {
-        graphics_fill_rect(w->x-2, w->y-2, w->w+4, w->h+4, 0xFFC0C0C0);
-        graphics_fill_rect(w->x, w->y, w->w, w->h, t->win_body);
-        graphics_fill_rect(w->x-2, w->y-2, w->w+4, 2, 0xFFFFFFFF);
-        graphics_fill_rect(w->x-2, w->y-2, 2, w->h+4, 0xFFFFFFFF);
-        graphics_fill_rect(w->x+w->w, w->y-2, 2, w->h+4, 0xFF404040);
-        graphics_fill_rect(w->x-2, w->y+w->h, w->w+4, 2, 0xFF404040);
-    }
-
-    uint32_t tc = w->focused ? t->win_title_active : t->win_title_inactive;
-    if (t->is_glass) {
-        graphics_fill_rect_gradient(w->x, w->y, w->w, WIN_CAPTION_H, tc, tc + 0x00202020);
-    } else {
-        graphics_fill_rect(w->x+2, w->y+2, w->w-4, WIN_CAPTION_H-2, tc);
-    }
-    graphics_draw_string_scaled(w->x+8, w->y+6, w->title, COL_WHITE, tc, 1);
-
-    int bx = w->x + w->w - 24;
-    graphics_fill_rect(bx, w->y+4, 18, 18, 0xFFCC3333);
-    graphics_draw_char(bx+6, w->y+9, 'X', COL_WHITE, 0xFFCC3333);
-
-    int cx = w->x + 4; int cy = w->y + WIN_CAPTION_H + 2;
-    int cw = w->w - 8; int ch = w->h - WIN_CAPTION_H - 6;
-    graphics_fill_rect(cx, cy, cw, ch, t->win_body);
-
-    if (w->type == APP_SYSMON) {
-        update_sysmon(w);
-        graphics_fill_rect(cx, cy, cw, ch, 0xFF000000);
-        for(int i=0; i<cw; i+=20) graphics_fill_rect(cx+i, cy, 1, ch, 0xFF003300);
-        for(int i=0; i<ch; i+=20) graphics_fill_rect(cx, cy+i, cw, 1, 0xFF003300);
-        SysMonState* s = &w->state.sysmon;
-        int prev_x = 0; int prev_y = ch;
-        for (int i=0; i<SYSMON_HIST; i++) {
-            int idx = (s->head - i + SYSMON_HIST) % SYSMON_HIST;
-            int val = s->cpu_hist[idx];
-            int x = cw - (i * (cw / SYSMON_HIST));
-            int y = ch - (val * ch / 100);
-            if (i>0) {
-                int dx = x - prev_x; int dy = y - prev_y;
-                int steps = (dx > 0 ? dx : -dx) > (dy > 0 ? dy : -dy) ? (dx > 0 ? dx : -dx) : (dy > 0 ? dy : -dy);
-                if (steps == 0) steps = 1;
-                for(int k=0; k<steps; k++) 
-                    graphics_put_pixel(cx + prev_x + (dx*k/steps), cy + prev_y + (dy*k/steps), 0xFF00FF00);
-            }
-            prev_x = x; prev_y = y;
-        }
-        graphics_draw_string_scaled(cx+4, cy+4, "CPU Usage", 0xFF00FF00, 0, 1);
-    } 
-    else if (w->type == APP_MINESWEEPER) {
-        MineState* ms = &w->state.mine;
-        int gx = (cw - 200)/2; int gy = 20;
-        for(int r=0; r<10; r++) {
-            for(int c=0; c<10; c++) {
-                int px = cx + gx + c*20; int py = cy + gy + r*20;
-                uint32_t col = 0xFFC0C0C0;
-                if (ms->view[r][c] == 1) col = 0xFF808080; 
-                graphics_fill_rect(px, py, 19, 19, col);
-                if (ms->view[r][c] == 2) {
-                    graphics_fill_rect(px+5, py+5, 10, 10, 0xFFFF0000);
-                } else if (ms->view[r][c] == 1) {
-                    if (ms->grid[r][c] == 9) {
-                        graphics_fill_rect(px+5, py+5, 10, 10, 0xFF000000);
-                    } else if (ms->grid[r][c] > 0) {
-                        char n = '0' + ms->grid[r][c];
-                        graphics_draw_char(px+6, py+6, n, 0xFF0000FF, col);
-                    }
-                }
-            }
-        }
-        char status[32];
-        if (ms->game_over) str_copy(status, "GAME OVER");
-        else { str_copy(status, "Flags: "); char n[4]; int_to_str(ms->flags_placed, n); int len=kstrlen_local(status); int k=0; while(n[k]){status[len++]=n[k++];} status[len]=0; }
-        graphics_draw_string_scaled(cx+10, cy+ch-20, status, COL_BLACK, t->win_body, 1);
-    }
-    else if (w->type == APP_RUN) {
-        graphics_draw_string_scaled(cx+10, cy+10, "Type command (calc, term, paint...):", COL_BLACK, t->win_body, 1);
-        graphics_fill_rect(cx+10, cy+30, cw-20, 24, COL_WHITE);
-        graphics_draw_string_scaled(cx+14, cy+38, w->state.run.cmd, COL_BLACK, COL_WHITE, 1);
-        if ((timer_get_ticks()/20)%2) {
-            int cl = kstrlen_local(w->state.run.cmd)*8;
-            graphics_fill_rect(cx+14+cl, cy+38, 2, 8, COL_BLACK);
-        }
-        graphics_fill_rect(cx+cw-60, cy+ch-30, 50, 24, 0xFFDDDDDD);
-        graphics_draw_string_scaled(cx+cw-50, cy+ch-22, "Run", COL_BLACK, 0xFFDDDDDD, 1);
-    }
-    else if (w->type == APP_PAINT) {
-        int th = 40;
-        // Toolbar
-        graphics_fill_rect(cx, cy, cw, th, 0xFFDDDDDD);
-        uint32_t p[] = {0xFF000000, 0xFFFFFFFF, 0xFFFF0000, 0xFF00FF00, 0xFF0000FF, 0xFFFFFF00, 0xFFFF00FF, 0xFF00FFFF};
-        for(int i=0; i<8; i++) {
-            graphics_fill_rect(cx+5+i*30, cy+5, 25, 25, p[i]);
-            if (w->state.paint.current_color == p[i]) graphics_fill_rect(cx+5+i*30, cy+30, 25, 3, 0xFF000000);
-        }
-        
-        int cv_y = th;
-        if (w->state.paint.canvas_buffer) {
-            uint32_t* b = w->state.paint.canvas_buffer;
-            int bw = w->state.paint.width;
-            for(int py=0; py < ch-th; py++) {
-                for(int px=0; px < cw; px++) {
-                    if (px < bw) graphics_put_pixel(cx+px, cy+th+py, b[py*bw + px]);
-                }
-            }
-        }
-    }
-    else {
-        graphics_draw_string_scaled(cx+10, cy+10, "App Running...", 0xFF888888, t->win_body, 1);
-        if(w->type == APP_TERMINAL) {
-            graphics_fill_rect(cx, cy, cw, ch, COL_BLACK);
-            graphics_draw_string_scaled(cx+4, cy+4, w->state.term.prompt, 0xFF00FF00, COL_BLACK, 1);
-            graphics_draw_string_scaled(cx+4+(kstrlen_local(w->state.term.prompt)*8), cy+4, w->state.term.input, COL_WHITE, COL_BLACK, 1);
-        }
-        if(w->type == APP_SETTINGS) {
-            graphics_draw_string_scaled(cx+20, cy+20, "Theme:", COL_BLACK, t->win_body, 1);
-            graphics_fill_rect(cx+80, cy+15, 100, 24, 0xFFCCCCCC);
-            graphics_draw_string_scaled(cx+90, cy+22, t->is_glass ? "Ocean Glass" : "Retro Grey", COL_BLACK, 0xFFCCCCCC, 1);
-            
-            graphics_draw_string_scaled(cx+20, cy+60, "Wallpaper:", COL_BLACK, t->win_body, 1);
-            graphics_fill_rect(cx+110, cy+55, 80, 24, w->state.settings.wallpaper_enabled ? 0xFF88FF88 : 0xFFFF8888);
-            graphics_draw_string_scaled(cx+120, cy+62, w->state.settings.wallpaper_enabled ? "ON" : "OFF", COL_BLACK, 0, 1);
-        }
-        
-        if (w->type == APP_NOTEPAD) {
-            graphics_fill_rect(cx, cy, cw, ch, COL_WHITE);
-            graphics_draw_string_scaled(cx+4, cy+4, w->state.notepad.buffer, COL_BLACK, COL_WHITE, 1);
-            if ((timer_get_ticks() / 15) % 2) {
-                 graphics_fill_rect(cx+6+(w->state.notepad.length*8), cy+6, 2, 10, COL_BLACK);
-            }
-        }
-        if (w->type == APP_CALC) {
-            char buf[16]; int_to_str(w->state.calc.current_val, buf);
-            draw_bevel_box(cx+10, cy+10, cw-20, 24, true);
-            graphics_fill_rect(cx+12, cy+12, cw-24, 20, COL_WHITE);
-            graphics_draw_string_scaled(cx+cw-14-(kstrlen_local(buf)*8), cy+16, buf, COL_BLACK, COL_WHITE, 1);
-            const char* btns[] = {"7","8","9","/", "4","5","6","*", "1","2","3","-", "C","0","=","+"};
-            for(int i=0; i<16; i++) {
-                int bx_pos = cx+10 + (i%4)*40; int by_pos = cy+45 + (i/4)*30;
-                bool h = rect_contains(bx_pos, by_pos, 35, 25, mouse.x, mouse.y);
-                draw_bevel_box(bx_pos, by_pos, 35, 25, h&&mouse.left_button);
-                graphics_draw_char(bx_pos+12, by_pos+8, btns[i][0], COL_BLACK, COL_BTN_FACE);
-            }
-        }
-        if (w->type == APP_FILES) {
-            graphics_fill_rect(cx+4, cy+4, cw-8, 18, 0xFFCCCCCC);
-            graphics_draw_string_scaled(cx+8, cy+8, "Name", COL_BLACK, 0xFFCCCCCC, 1);
-            size_t count = fs_file_count();
-            for (size_t i=0; i<count; i++) {
-                const struct fs_file* f = fs_file_at(i); if(!f) continue;
-                int ry = cy+24 + i*18;
-                bool sel = ((int)i == w->state.files.selected_index);
-                if (sel) graphics_fill_rect(cx+4, ry, cw-8, 18, 0xFF000080);
-                graphics_draw_string_scaled(cx+20, ry+4, f->name, sel?COL_WHITE:COL_BLACK, sel?0xFF000080:COL_WHITE, 1);
-                char sz[16]; int_to_str(f->size, sz);
-                graphics_draw_string_scaled(cx+cw-60, ry+4, sz, sel?COL_WHITE:COL_BLACK, sel?0xFF000080:COL_WHITE, 1);
-            }
-        }
-        if (w->type == APP_BROWSER) {
-            draw_bevel_box(cx+2, cy+2, cw-40, 24, true);
-            graphics_fill_rect(cx+4, cy+4, cw-44, 20, COL_WHITE);
-            graphics_draw_string_scaled(cx+6, cy+8, w->state.browser.url, COL_BLACK, COL_WHITE, 1);
-            draw_bevel_box(cx+cw-35, cy+2, 30, 24, false);
-            graphics_draw_string_scaled(cx+cw-28, cy+8, "GO", COL_BLACK, COL_BTN_FACE, 1);
-            
-            int content_y = cy + 30;
-            int content_h = ch - 32;
-            graphics_fill_rect(cx+2, content_y, cw-4, content_h, COL_WHITE);
-            graphics_draw_string_scaled(cx+10, content_y+10, "Nostalux Web Browser v1.0", 0xFF0000AA, COL_WHITE, 2);
-            graphics_draw_string_scaled(cx+10, content_y+40, "Status:", 0xFF555555, COL_WHITE, 1);
-            graphics_draw_string_scaled(cx+70, content_y+40, w->state.browser.status, 0xFF00AA00, COL_WHITE, 1);
-            graphics_draw_string_scaled(cx+10, content_y+70, "Welcome to the future of browsing!", COL_BLACK, COL_WHITE, 1);
-        }
-    }
-
-    graphics_fill_rect(w->x + w->w - RESIZE_HANDLE, w->y + w->h - RESIZE_HANDLE, RESIZE_HANDLE, RESIZE_HANDLE, 0xFF888888);
+static void draw_window_border(int x, int y, int w, int h) {
+    graphics_fill_rect(x, y, w, h, COL_WIN_BODY);
+    graphics_fill_rect(x, y, w, 1, 0xFF808080);
+    graphics_fill_rect(x, y, 1, h, 0xFF808080);
+    graphics_fill_rect(x, y+h-1, w, 1, 0xFF202020);
+    graphics_fill_rect(x+w-1, y, 1, h, 0xFF202020);
 }
 
 static void draw_icon_bitmap(int x, int y, const uint8_t bitmap[24][24]) {
@@ -772,6 +880,216 @@ static void draw_wallpaper(void) {
     }
 }
 
+static void render_paint_app(Window* w) {
+    int cx = w->x + 6; 
+    int cy = w->y + WIN_CAPTION_H + 6;
+    int cw = w->w - 12; 
+    int ch = w->h - WIN_CAPTION_H - 12;
+    
+    int tool_h = 40;
+    graphics_fill_rect(cx, cy, cw, tool_h, 0xFFE0E0E0);
+    
+    uint32_t colors[] = {0xFF000000, 0xFFFFFFFF, 0xFFFF0000, 0xFF00FF00, 0xFF0000FF, 0xFFFFFF00, 0xFFFFFFFF};
+    for(int i=0; i<8; i++) {
+        int px = cx + 5 + (i*30);
+        int py = cy + 5;
+        graphics_fill_rect(px, py, 25, 25, colors[i]);
+        if (w->state.paint.current_color == colors[i]) {
+            graphics_fill_rect(px, py+26, 25, 3, 0xFF000000);
+        }
+    }
+    
+    int cv_y = cy + tool_h;
+    int cv_h = ch - tool_h;
+    
+    if (w->state.paint.canvas_buffer) {
+        uint32_t* buf = w->state.paint.canvas_buffer;
+        int buf_w = w->state.paint.width;
+        int start_x = cx;
+        int start_y = cv_y;
+        
+        for (int y = 0; y < cv_h; y++) {
+            for (int x = 0; x < cw; x++) {
+                if (x < buf_w) {
+                    uint32_t col = buf[y * buf_w + x];
+                    graphics_put_pixel(start_x + x, start_y + y, col);
+                }
+            }
+        }
+    } else {
+        graphics_fill_rect(cx, cv_y, cw, cv_h, COL_WHITE);
+    }
+}
+
+static void render_window(Window* w) {
+    Theme* t = &themes[current_theme_idx];
+    if (!w || !w->visible || w->minimized) return;
+
+    if (!w->maximized) graphics_fill_rect_alpha(w->x+6, w->y+6, w->w, w->h, 0x000000, 60);
+
+    if (t->is_glass) {
+        graphics_fill_rect_alpha(w->x-2, w->y-2, w->w+4, w->h+4, t->win_border, 100);
+        graphics_fill_rect(w->x, w->y, w->w, w->h, t->win_body);
+    } else {
+        draw_window_border(w->x, w->y, w->w, w->h);
+    }
+
+    uint32_t tc = w->focused ? t->win_title_active : t->win_title_inactive;
+    if (t->is_glass) {
+        graphics_fill_rect_gradient(w->x, w->y, w->w, WIN_CAPTION_H, tc, tc + 0x00202020);
+    } else {
+        graphics_fill_rect(w->x+2, w->y+2, w->w-4, WIN_CAPTION_H-2, tc);
+    }
+    graphics_draw_string_scaled(w->x+8, w->y+6, w->title, COL_WHITE, tc, 1);
+
+    int bx = w->x + w->w - 24;
+    draw_bevel_box(bx, w->y+4, 18, 18, false);
+    graphics_draw_char(bx+5, w->y+9, 'X', COL_BLACK, COL_BTN_FACE);
+
+    int mx = bx - 22;
+    draw_bevel_box(mx, w->y+4, 18, 18, false);
+    graphics_draw_char(mx+5, w->y+9, '#', COL_BLACK, COL_BTN_FACE);
+
+    int mn = mx - 22;
+    draw_bevel_box(mn, w->y+4, 18, 18, false);
+    graphics_draw_char(mn+5, w->y+9, '_', COL_BLACK, COL_BTN_FACE);
+
+    int cx = w->x+2; int cy = w->y+WIN_CAPTION_H+2;
+    int cw = w->w-4; int ch = w->h-WIN_CAPTION_H-4;
+    graphics_fill_rect(cx, cy, cw, ch, COL_WIN_BODY);
+
+    if (w->type == APP_NOTEPAD) {
+        draw_bevel_box(cx+2, cy+2, cw-4, ch-4, true);
+        graphics_fill_rect(cx+4, cy+4, cw-8, ch-8, COL_WHITE);
+        graphics_draw_string_scaled(cx+6, cy+6, w->state.notepad.buffer, COL_BLACK, COL_WHITE, 1);
+        if ((timer_get_ticks() / 15) % 2) {
+             graphics_fill_rect(cx+6+(w->state.notepad.length*8), cy+6, 2, 10, COL_BLACK);
+        }
+    } 
+    else if (w->type == APP_PAINT) {
+        render_paint_app(w);
+    }
+    else if (w->type == APP_BROWSER) {
+        draw_bevel_box(cx+2, cy+2, cw-40, 24, true);
+        graphics_fill_rect(cx+4, cy+4, cw-44, 20, COL_WHITE);
+        graphics_draw_string_scaled(cx+6, cy+8, w->state.browser.url, COL_BLACK, COL_WHITE, 1);
+        draw_bevel_box(cx+cw-35, cy+2, 30, 24, false);
+        graphics_draw_string_scaled(cx+cw-28, cy+8, "GO", COL_BLACK, COL_BTN_FACE, 1);
+        
+        int content_y = cy + 30;
+        int content_h = ch - 32;
+        graphics_fill_rect(cx+2, content_y, cw-4, content_h, COL_WHITE);
+        graphics_draw_string_scaled(cx+10, content_y+10, "Nostalux Web Browser v1.0", 0xFF0000AA, COL_WHITE, 2);
+        graphics_draw_string_scaled(cx+10, content_y+40, "Status:", 0xFF555555, COL_WHITE, 1);
+        graphics_draw_string_scaled(cx+70, content_y+40, w->state.browser.status, 0xFF00AA00, COL_WHITE, 1);
+        graphics_draw_string_scaled(cx+10, content_y+70, "Welcome to the future of browsing!", COL_BLACK, COL_WHITE, 1);
+    }
+    else if (w->type == APP_TASKMGR) {
+        graphics_draw_string_scaled(cx+10, cy+10, "PID  Name        Status", COL_BLACK, COL_WIN_BODY, 1);
+        graphics_fill_rect(cx+10, cy+22, cw-20, 1, 0xFF888888);
+        int list_y = cy + 30;
+        for(int i=0; i<MAX_WINDOWS; i++) {
+            if (windows[i] && windows[i]->visible) {
+                if (w->state.taskmgr.selected_pid == i) {
+                    graphics_fill_rect(cx+8, list_y-2, cw-16, 14, 0xFFCCCCFF);
+                }
+                char buf[64];
+                char pid_s[4]; int_to_str(i, pid_s);
+                graphics_draw_string_scaled(cx+10, list_y, pid_s, COL_BLACK, COL_WIN_BODY, 1);
+                graphics_draw_string_scaled(cx+50, list_y, windows[i]->title, COL_BLACK, COL_WIN_BODY, 1);
+                const char* st = windows[i]->minimized ? "Min" : "Vis";
+                graphics_draw_string_scaled(cx+200, list_y, st, COL_BLACK, COL_WIN_BODY, 1);
+                list_y += 20;
+            }
+        }
+        draw_bevel_box(cx + cw - 80, cy + 10, 60, 24, false);
+        graphics_draw_string_scaled(cx+cw-70, cy+16, "End Task", COL_BLACK, COL_BTN_FACE, 1);
+    }
+    else if (w->type == APP_SETTINGS) {
+        graphics_draw_string_scaled(cx+10, cy+10, "Desktop Wallpaper:", COL_BLACK, COL_WIN_BODY, 1);
+        bool on = w->state.settings.wallpaper_enabled;
+        draw_bevel_box(cx+10, cy+30, 140, 30, on);
+        const char* lbl = on ? "Enabled (Coral)" : "Disabled (Blue)";
+        graphics_draw_string_scaled(cx+20, cy+40, lbl, COL_BLACK, COL_BTN_FACE, 1);
+        graphics_draw_string_scaled(cx+10, cy+80, "System Theme: Ocean", COL_BLACK, COL_WIN_BODY, 1);
+    }
+    else if (w->type == APP_TERMINAL) {
+        draw_bevel_box(cx+2, cy+2, cw-4, ch-4, true);
+        graphics_fill_rect(cx+4, cy+4, cw-8, ch-8, COL_BLACK);
+        for(int i=0; i<6; i++) 
+            graphics_draw_string_scaled(cx+6, cy+6+(i*10), w->state.term.history[i], 0xFF00FF00, COL_BLACK, 1);
+        int input_y = cy+66;
+        graphics_draw_string_scaled(cx+6, input_y, w->state.term.prompt, 0xFF00FF00, COL_BLACK, 1);
+        int pw = kstrlen_local(w->state.term.prompt)*8;
+        graphics_draw_string_scaled(cx+6+pw, input_y, w->state.term.input, COL_WHITE, COL_BLACK, 1);
+        if ((timer_get_ticks()/15)%2) graphics_fill_rect(cx+6+pw+(w->state.term.input_len*8), input_y, 8, 8, 0xFF00FF00);
+    }
+    else if (w->type == APP_CALC) {
+        char buf[16]; int_to_str(w->state.calc.current_val, buf);
+        draw_bevel_box(cx+10, cy+10, cw-20, 24, true);
+        graphics_fill_rect(cx+12, cy+12, cw-24, 20, COL_WHITE);
+        graphics_draw_string_scaled(cx+cw-14-(kstrlen_local(buf)*8), cy+16, buf, COL_BLACK, COL_WHITE, 1);
+        const char* btns[] = {"7","8","9","/", "4","5","6","*", "1","2","3","-", "C","0","=","+"};
+        for(int i=0; i<16; i++) {
+            int bx_pos = cx+10 + (i%4)*40; int by_pos = cy+45 + (i/4)*30;
+            bool h = rect_contains(bx_pos, by_pos, 35, 25, mouse.x, mouse.y);
+            draw_bevel_box(bx_pos, by_pos, 35, 25, h&&mouse.left_button);
+            graphics_draw_char(bx_pos+12, by_pos+8, btns[i][0], COL_BLACK, COL_BTN_FACE);
+        }
+    }
+    else if (w->type == APP_FILES) {
+        draw_bevel_box(cx+2, cy+2, cw-4, ch-4, true);
+        graphics_fill_rect(cx+4, cy+4, cw-8, ch-8, COL_WHITE);
+        graphics_fill_rect(cx+4, cy+4, cw-8, 18, 0xFFCCCCCC);
+        graphics_draw_string_scaled(cx+8, cy+8, "Name", COL_BLACK, 0xFFCCCCCC, 1);
+        size_t count = fs_file_count();
+        for (size_t i=0; i<count; i++) {
+            const struct fs_file* f = fs_file_at(i); if(!f) continue;
+            int ry = cy+24 + i*18;
+            bool sel = ((int)i == w->state.files.selected_index);
+            if (sel) graphics_fill_rect(cx+4, ry, cw-8, 18, 0xFF000080);
+            graphics_draw_string_scaled(cx+20, ry+4, f->name, sel?COL_WHITE:COL_BLACK, sel?0xFF000080:COL_WHITE, 1);
+            char sz[16]; int_to_str(f->size, sz);
+            graphics_draw_string_scaled(cx+cw-60, ry+4, sz, sel?COL_WHITE:COL_BLACK, sel?0xFF000080:COL_WHITE, 1);
+        }
+    }
+
+    graphics_fill_rect(w->x + w->w - RESIZE_HANDLE, w->y + w->h - RESIZE_HANDLE, RESIZE_HANDLE, RESIZE_HANDLE, 0xFF888888);
+}
+
+static void render_taskbar(void) {
+    Theme* t = &themes[current_theme_idx];
+    int ty = screen_h - TASKBAR_H;
+    
+    if (t->is_glass) graphics_fill_rect_alpha(0, ty, screen_w, TASKBAR_H, t->taskbar, 200);
+    else graphics_fill_rect(0, ty, screen_w, TASKBAR_H, t->taskbar);
+    
+    uint32_t sb = start_menu_open ? 0xFF004400 : 0xFF006600;
+    graphics_fill_rect(2, ty+2, 60, TASKBAR_H-4, sb);
+    graphics_draw_string_scaled(10, ty+12, "START", COL_WHITE, sb, 1);
+    
+    int tx = 70;
+    for(int i=0; i<MAX_WINDOWS; i++) {
+        if (windows[i] && windows[i]->visible) {
+            bool active = windows[i]->focused && !windows[i]->minimized;
+            uint32_t bg = active ? 0xFF505050 : 0xFF303030;
+            if (!t->is_glass && active) bg = 0xFFFFFFFF;
+            if (!t->is_glass && !active) bg = 0xFFC0C0C0;
+            
+            graphics_fill_rect(tx, ty+2, 100, TASKBAR_H-4, bg);
+            uint32_t tc = t->is_glass ? COL_WHITE : COL_BLACK;
+            char title[10]; int k=0; while(windows[i]->title[k]&&k<8){title[k]=windows[i]->title[k];k++;} title[k]=0;
+            graphics_draw_string_scaled(tx+5, ty+12, title, tc, bg, 1);
+            
+            if (active) graphics_fill_rect(tx, ty+TASKBAR_H-2, 100, 2, COL_ACCENT);
+            tx += 105;
+        }
+    }
+    
+    char time[16]; syscall_get_time(time);
+    graphics_draw_string_scaled(screen_w-60, ty+12, time, COL_WHITE, t->taskbar, 1);
+}
+
 static void render_desktop(void) {
     if (g_wallpaper_enabled) {
         draw_wallpaper();
@@ -802,41 +1120,19 @@ static void render_desktop(void) {
         if(windows[i]) render_window(windows[i]);
     }
 
-    int ty = screen_h - TASKBAR_H;
-    Theme* t = &themes[current_theme_idx];
-    if (t->is_glass) graphics_fill_rect_alpha(0, ty, screen_w, TASKBAR_H, t->taskbar, 200);
-    else graphics_fill_rect(0, ty, screen_w, TASKBAR_H, t->taskbar);
-    
-    bool start_hover = rect_contains(0, ty, 70, TASKBAR_H, mouse.x, mouse.y);
-    uint32_t s_col = start_menu_open ? 0xFF0050A0 : (start_hover ? 0xFF303030 : 0xFF202020);
-    graphics_fill_rect(0, ty, 70, TASKBAR_H, s_col);
-    graphics_draw_string_scaled(12, ty+10, "Start", COL_WHITE, s_col, 1);
-    
-    int tx = 80;
-    for(int i=0; i<MAX_WINDOWS; i++) {
-        if(windows[i] && windows[i]->visible) {
-            bool active = (windows[i]->focused && !windows[i]->minimized);
-            uint32_t bcol = active ? 0xFF404040 : 0x00000000;
-            if (active) graphics_fill_rect(tx, ty+2, 120, TASKBAR_H-4, bcol);
-            if (active) graphics_fill_rect(tx, ty+TASKBAR_H-2, 120, 2, COL_ACCENT);
-            char buf[12]; int k=0; while(k<10 && windows[i]->title[k]){buf[k]=windows[i]->title[k]; k++;} buf[k]=0;
-            graphics_draw_string_scaled(tx+10, ty+12, buf, COL_WHITE, bcol, 1);
-            tx += 124;
-        }
-    }
+    render_taskbar();
 
     char time_buf[8]; syscall_get_time(time_buf);
-    graphics_draw_string_scaled(screen_w - 60, ty+12, time_buf, COL_WHITE, t->taskbar, 1);
     
     char mouse_pos[16];
     int_to_str(mouse.x, mouse_pos);
     int len = kstrlen_local(mouse_pos);
     mouse_pos[len] = ',';
     int_to_str(mouse.y, mouse_pos+len+1);
-    graphics_draw_string_scaled(screen_w-150, ty+12, mouse_pos, 0xFF888888, t->taskbar, 1);
+    graphics_draw_string_scaled(screen_w-150, screen_h-TASKBAR_H+12, mouse_pos, 0xFF888888, themes[current_theme_idx].taskbar, 1);
 
     if (start_menu_open) {
-        int w = 180; int h = 300; int y = screen_h - TASKBAR_H - h;
+        int w = 180; int h = 330; int y = screen_h - TASKBAR_H - h;
         graphics_fill_rect_alpha(0, y, w, h, 0xFF1F1F1F, 240);
         graphics_fill_rect(0, y, w, 1, 0xFF404040);
         struct { int y_off; const char* lbl; AppType app; } items[] = {
@@ -905,15 +1201,15 @@ static void on_click(int x, int y) {
 
     if (y >= ty) {
         if (x < 70) { start_menu_open = !start_menu_open; return; }
-        int tx = 80;
+        int tx = 70;
         for(int i=0; i<MAX_WINDOWS; i++) {
             if(windows[i] && windows[i]->visible) {
-                if(x >= tx && x < tx+120) {
+                if(x >= tx && x < tx+100) {
                     if (windows[i]->focused && !windows[i]->minimized) windows[i]->minimized = true;
                     else { windows[i]->minimized = false; focus_window(i); }
                     return;
                 }
-                tx += 124;
+                tx += 105;
             }
         }
         return;
@@ -925,7 +1221,6 @@ static void on_click(int x, int y) {
             if (rect_contains(w->x, w->y, w->w, w->h, x, y)) {
                 int idx = focus_window(i); w = windows[idx];
                 
-                // Resize
                 if (x > w->x + w->w - RESIZE_HANDLE && y > w->y + w->h - RESIZE_HANDLE) {
                     w->resizing = true;
                     w->drag_off_x = x - w->w;
@@ -961,7 +1256,6 @@ static void on_click(int x, int y) {
         }
     }
     
-    // Desktop Icons
     struct { int x, y; const char* n; AppType t; } icons[] = {
         {20, 20, "Terminal", APP_TERMINAL}, {20, 90, "Files", APP_FILES},
         {20, 160, "Paint", APP_PAINT}, {20, 230, "Browser", APP_BROWSER},
