@@ -1579,7 +1579,7 @@ static void on_click(int x, int y) {
         for(int i=0; i<MAX_WINDOWS; i++) {
             if(windows[i] && windows[i]->visible) {
                 if(x >= tx && x < tx+100) {
-                    if (windows[i]->focused && !windows[i].minimized) windows[i]->minimized = true;
+                    if (windows[i]->focused && !windows[i]->minimized) windows[i]->minimized = true;
                     else { windows[i]->minimized = false; focus_window(i); }
                     return;
                 }
