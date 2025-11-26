@@ -42,10 +42,10 @@ static uint8_t mouse_read(void) {
 }
 
 void mouse_init(void) {
-    // Critical: Disable interrupts during init to prevent ISR from stealing ACKs
-    __asm__ volatile("cli");
-
     uint8_t status;
+
+    // Disable interrupts strictly during setup
+    __asm__ volatile("cli");
 
     // 1. Enable Mouse Port (Command 0xA8)
     mouse_wait(false);
@@ -75,39 +75,47 @@ void mouse_init(void) {
     mouse_write(0xF4);
     mouse_read(); // Acknowledge
 
-    // Center Mouse
-    g_mouse_x = graphics_get_width() / 2;
-    g_mouse_y = graphics_get_height() / 2;
+    // Initialize position to center
+    int w = graphics_get_width();
+    int h = graphics_get_height();
+    g_mouse_x = (w > 0) ? w / 2 : 400;
+    g_mouse_y = (h > 0) ? h / 2 : 300;
+    g_sensitivity = 1;
+    g_mouse_cycle = 0;
 
     // Unmask IRQ 12 (Slave PIC line 4)
     interrupts_enable_irq(12);
     
-    // Re-enable interrupts
     __asm__ volatile("sti");
 
-    syslog_write("Mouse: PS/2 initialized (IRQ12 unmasked)");
+    syslog_write("Mouse: PS/2 initialized");
 }
 
 void mouse_handle_interrupt(void) {
     uint8_t status = inb(MOUSE_PORT_STATUS);
     
-    // Check if there is data to read.
+    // Check if there is data to read
     if (!(status & 0x01)) return;
 
-    // Read the data.
+    // Read the data
     uint8_t b = inb(MOUSE_PORT_DATA);
 
-    // If the data didn't come from the mouse, ignore it.
+    // If this byte didn't come from the auxiliary device (mouse), ignore it for mouse logic
+    // (though we still consumed it from the port to clear the buffer)
     if (!(status & 0x20)) return;
 
     switch(g_mouse_cycle) {
         case 0:
             // Packet Byte 1
-            // We verify bit 3 is 1 to ensure sync.
-            // If out of sync, we discard byte and wait for next header.
+            // Bit 3 should be 1. If not, we are out of sync.
+            // However, some scroll mice use different packets.
+            // We try to enforce synchronization.
             if ((b & 0x08) == 0x08) { 
                 g_mouse_byte[0] = b;
                 g_mouse_cycle++;
+            } else {
+                // Desync detected, reset cycle
+                g_mouse_cycle = 0;
             }
             break;
         case 1:
@@ -120,20 +128,24 @@ void mouse_handle_interrupt(void) {
             g_mouse_byte[2] = b;
             g_mouse_cycle = 0;
 
-            // Handle movement
-            int dx = (int8_t)g_mouse_byte[1];
-            int dy = (int8_t)g_mouse_byte[2];
+            // Process Packet
+            int8_t raw_x = (int8_t)g_mouse_byte[1];
+            int8_t raw_y = (int8_t)g_mouse_byte[2];
             
-            // Overflow checks
-            if ((g_mouse_byte[0] & 0x40) || (g_mouse_byte[0] & 0x80)) {
-                dx = 0; dy = 0;
-            }
+            // Handle overflow bits in Byte 0
+            // Bit 6: X Overflow, Bit 7: Y Overflow
+            // If overflow, we can either ignore or clamp. 
+            // Ignoring (setting to 0) causes freezing on fast movement.
+            // We'll just use the raw values, which might wrap, but better than freezing.
+            
+            int dx = (int)raw_x;
+            int dy = (int)raw_y;
 
-            // Apply Sensitivity
             dx *= g_sensitivity;
             dy *= g_sensitivity;
             
-            // Update Position (PS/2 Y is bottom-to-top)
+            // Update Position
+            // PS/2 Y is bottom-to-top, screen is top-to-bottom -> subtract dy
             g_mouse_x += dx;
             g_mouse_y -= dy; 
 
@@ -147,7 +159,7 @@ void mouse_handle_interrupt(void) {
             if (g_mouse_y < 0) g_mouse_y = 0;
             if (g_mouse_y >= h) g_mouse_y = h - 1;
 
-            // Update Buttons
+            // Buttons
             g_left_btn = (g_mouse_byte[0] & 0x01) != 0;
             g_right_btn = (g_mouse_byte[0] & 0x02) != 0;
             break;
