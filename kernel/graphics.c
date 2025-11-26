@@ -173,6 +173,51 @@ void graphics_fill_rect(int x, int y, int w, int h, uint32_t color) {
     }
 }
 
+// Software Alpha Blending
+// Formula: Result = (Src * Alpha + Dest * (255 - Alpha)) / 255
+void graphics_fill_rect_alpha(int x, int y, int w, int h, uint32_t color, uint8_t alpha) {
+    if (alpha == 0) return;
+    if (alpha == 255) {
+        graphics_fill_rect(x, y, w, h, color);
+        return;
+    }
+
+    int end_x = x + w;
+    int end_y = y + h;
+    
+    // Clipping
+    if (x < 0) x = 0;
+    if (y < 0) y = 0;
+    if (end_x > (int)g_width) end_x = g_width;
+    if (end_y > (int)g_height) end_y = g_height;
+    
+    uint32_t stride = g_pitch / 4;
+    
+    // Pre-calculate source components
+    uint32_t src_r = (color >> 16) & 0xFF;
+    uint32_t src_g = (color >> 8) & 0xFF;
+    uint32_t src_b = (color) & 0xFF;
+    
+    uint32_t inv_alpha = 255 - alpha;
+
+    for (int j = y; j < end_y; j++) {
+        uint32_t* row = &g_draw_buffer[j * stride];
+        for (int i = x; i < end_x; i++) {
+            uint32_t bg = row[i];
+            uint32_t bg_r = (bg >> 16) & 0xFF;
+            uint32_t bg_g = (bg >> 8) & 0xFF;
+            uint32_t bg_b = (bg) & 0xFF;
+
+            // Blending
+            uint32_t out_r = (src_r * alpha + bg_r * inv_alpha) / 255;
+            uint32_t out_g = (src_g * alpha + bg_g * inv_alpha) / 255;
+            uint32_t out_b = (src_b * alpha + bg_b * inv_alpha) / 255;
+
+            row[i] = (0xFF000000) | (out_r << 16) | (out_g << 8) | out_b;
+        }
+    }
+}
+
 void graphics_draw_char(int x, int y, char c, uint32_t fg, uint32_t bg) {
     // Fallback for undefined chars (draw box)
     const uint8_t* glyph = FONT_8X8[0x20]; 
