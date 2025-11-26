@@ -56,25 +56,22 @@ void gui_set_running(bool running) { g_gui_running = running; }
 
 // --- Configuration ---
 #define MAX_WINDOWS 16
-#define WIN_CAPTION_H 28
-#define TASKBAR_H 34
+#define WIN_CAPTION_H 26
+#define TASKBAR_H 30
 
-// Colors
-#define COL_TASKBAR     0xFF18334E
-#define COL_START_BTN   0xFF1F4E79
-#define COL_START_HOVER 0xFF3465A4
-#define COL_WIN_TITLE_1 0xFF0058EE
-#define COL_WIN_TITLE_2 0xFF002488
-#define COL_WIN_INACT_1 0xFF888888
-#define COL_WIN_INACT_2 0xFF666666
-#define COL_WIN_BODY    0xFFECE9D8
-#define COL_BTN_HOVER   0xFF4F81BD
-#define COL_BTN_PRESS   0xFF2F518D
-#define COL_WHITE       0xFFFFFFFF
+// Colors (Classic Theme)
+#define COL_DESKTOP     0xFF3A6EA5 
+#define COL_TASKBAR     0xFFC0C0C0
+#define COL_WIN_BODY    0xFFC0C0C0
+#define COL_WIN_TITLE_1 0xFF000080
+#define COL_WIN_TITLE_2 0xFF1084D0
+#define COL_WIN_TEXT    0xFFFFFFFF
+#define COL_WIN_TEXT_IN 0xFFC0C0C0
+#define COL_BTN_FACE    0xFFC0C0C0
+#define COL_BTN_SHADOW  0xFF404040
+#define COL_BTN_HILIGHT 0xFFFFFFFF
 #define COL_BLACK       0xFF000000
-#define COL_RED         0xFFE81123
-#define COL_RED_HOVER   0xFFFF4444
-#define COL_GREEN       0xFF00FF00
+#define COL_WHITE       0xFFFFFFFF
 
 typedef enum { 
     APP_NONE, 
@@ -136,10 +133,11 @@ static bool start_menu_open = false;
 static int screen_w, screen_h;
 static MouseState mouse;
 static MouseState prev_mouse;
-static uint32_t desktop_col_top = 0xFF2D73A8;
-static uint32_t desktop_col_bot = 0xFF103050;
+static uint32_t desktop_color = COL_DESKTOP;
 
-// Arrow Cursor Bitmap
+// --- BITMAPS ---
+
+// Arrow Cursor (12x19)
 static const uint8_t CURSOR_BITMAP[19][12] = {
     {1,1,0,0,0,0,0,0,0,0,0,0}, {1,2,1,0,0,0,0,0,0,0,0,0}, {1,2,2,1,0,0,0,0,0,0,0,0},
     {1,2,2,2,1,0,0,0,0,0,0,0}, {1,2,2,2,2,1,0,0,0,0,0,0}, {1,2,2,2,2,2,1,0,0,0,0,0},
@@ -150,35 +148,175 @@ static const uint8_t CURSOR_BITMAP[19][12] = {
     {0,0,0,0,0,0,1,1,0,0,0,0}
 };
 
-// Trash Bin Icon Bitmap (24x26)
-// 0: Trans, 1: Black, 2: Blue, 3: DarkBlue, 4: White, 5: Grey
-static const uint8_t TRASH_BITMAP[26][24] = {
-    {0,0,0,0,0,0,0,1,1,1,1,1,0,0,0,0,0,0,0,0,0,0,0,0},
-    {0,0,0,0,0,1,1,4,4,5,4,4,1,1,0,0,0,0,0,0,0,0,0,0},
-    {0,0,0,0,1,4,4,5,5,5,4,5,4,4,1,0,0,0,0,0,0,0,0,0},
-    {0,0,0,1,4,5,5,4,4,5,5,4,5,5,4,1,0,0,0,0,0,0,0,0}, 
-    {0,0,1,1,1,1,1,1,1,1,1,1,1,1,1,1,1,0,0,0,0,0,0,0}, 
-    {0,1,2,2,2,2,2,2,2,2,2,2,2,2,2,2,2,1,0,0,0,0,0,0}, 
-    {0,1,3,3,3,3,3,3,3,3,3,3,3,3,3,3,3,1,0,0,0,0,0,0}, 
-    {0,0,1,2,2,2,2,2,2,2,2,2,2,2,2,2,1,0,0,0,0,0,0,0}, 
-    {0,0,1,3,2,2,2,2,2,2,2,2,2,2,2,3,1,0,0,0,0,0,0,0},
-    {0,0,1,3,2,2,2,2,4,4,2,2,2,2,2,3,1,0,0,0,0,0,0,0}, 
-    {0,0,1,3,2,2,2,4,2,2,4,2,2,2,2,3,1,0,0,0,0,0,0,0},
-    {0,0,1,3,2,2,2,2,2,4,2,2,2,2,2,3,1,0,0,0,0,0,0,0},
-    {0,0,1,3,2,2,2,2,4,2,4,2,2,2,2,3,1,0,0,0,0,0,0,0},
-    {0,0,1,3,2,2,2,4,4,4,4,4,2,2,2,3,1,0,0,0,0,0,0,0},
-    {0,0,1,3,2,2,2,2,2,4,2,2,2,2,2,3,1,0,0,0,0,0,0,0},
-    {0,0,1,3,2,2,2,2,4,2,4,2,2,2,2,3,1,0,0,0,0,0,0,0},
-    {0,0,1,3,2,2,2,4,2,2,2,4,2,2,2,3,1,0,0,0,0,0,0,0},
-    {0,0,1,3,2,2,2,2,2,2,2,2,2,2,2,3,1,0,0,0,0,0,0,0},
-    {0,0,1,3,2,2,2,2,2,2,2,2,2,2,2,3,1,0,0,0,0,0,0,0},
-    {0,0,1,3,2,2,2,2,2,2,2,2,2,2,2,3,1,0,0,0,0,0,0,0},
-    {0,0,1,3,2,2,2,2,2,2,2,2,2,2,2,3,1,0,0,0,0,0,0,0},
-    {0,0,1,3,2,2,2,2,2,2,2,2,2,2,2,3,1,0,0,0,0,0,0,0},
-    {0,0,0,1,3,2,2,2,2,2,2,2,2,2,3,1,0,0,0,0,0,0,0,0},
-    {0,0,0,1,3,3,3,3,3,3,3,3,3,3,3,1,0,0,0,0,0,0,0,0},
-    {0,0,0,0,1,1,1,1,1,1,1,1,1,1,1,0,0,0,0,0,0,0,0,0},
+// Generic 24x24 Icon Bitmaps
+// 0:Trans, 1:Black, 2:DarkGrey, 3:Grey, 4:White, 5:Yellow, 6:Blue, 7:Green, 8:Red
+
+// Terminal Icon
+static const uint8_t ICON_TERM[24][24] = {
+    {1,1,1,1,1,1,1,1,1,1,1,1,1,1,1,1,1,1,1,1,1,1,1,1},
+    {1,3,3,3,3,3,3,3,3,3,3,3,3,3,3,3,3,3,3,3,3,3,3,1},
+    {1,1,1,1,1,1,1,1,1,1,1,1,1,1,1,1,1,1,1,1,1,1,1,1},
+    {1,1,7,7,1,1,1,1,1,1,1,1,1,1,1,1,1,1,1,1,1,1,1,1},
+    {1,1,1,7,7,1,1,1,1,1,1,1,1,1,1,1,1,1,1,1,1,1,1,1},
+    {1,1,1,1,7,7,1,1,1,1,1,1,1,1,1,1,1,1,1,1,1,1,1,1},
+    {1,1,1,1,1,7,7,1,1,1,1,1,1,1,1,1,1,1,1,1,1,1,1,1},
+    {1,1,1,1,7,7,1,1,1,1,1,1,1,1,1,1,1,1,1,1,1,1,1,1},
+    {1,1,1,7,7,1,1,1,1,1,1,1,1,1,1,1,1,1,1,1,1,1,1,1},
+    {1,1,7,7,1,1,1,1,1,1,1,1,1,1,1,1,1,1,1,1,1,1,1,1},
+    {1,1,1,1,1,1,1,1,1,1,1,1,1,1,1,1,1,1,1,1,1,1,1,1},
+    {1,1,1,1,1,1,1,1,1,1,1,1,1,1,1,1,1,1,1,1,1,1,1,1},
+    {1,1,1,1,1,1,1,1,1,1,1,1,1,1,1,1,7,7,7,7,7,1,1,1},
+    {1,1,1,1,1,1,1,1,1,1,1,1,1,1,1,1,7,7,7,7,7,1,1,1},
+    {1,1,1,1,1,1,1,1,1,1,1,1,1,1,1,1,1,1,1,1,1,1,1,1},
+    {1,1,1,1,1,1,1,1,1,1,1,1,1,1,1,1,1,1,1,1,1,1,1,1},
+    {1,1,1,1,1,1,1,1,1,1,1,1,1,1,1,1,1,1,1,1,1,1,1,1},
+    {1,1,1,1,1,1,1,1,1,1,1,1,1,1,1,1,1,1,1,1,1,1,1,1},
+    {1,1,1,1,1,1,1,1,1,1,1,1,1,1,1,1,1,1,1,1,1,1,1,1},
+    {1,1,1,1,1,1,1,1,1,1,1,1,1,1,1,1,1,1,1,1,1,1,1,1},
+    {1,1,1,1,1,1,1,1,1,1,1,1,1,1,1,1,1,1,1,1,1,1,1,1},
+    {1,1,1,1,1,1,1,1,1,1,1,1,1,1,1,1,1,1,1,1,1,1,1,1},
+    {1,1,1,1,1,1,1,1,1,1,1,1,1,1,1,1,1,1,1,1,1,1,1,1},
+    {1,1,1,1,1,1,1,1,1,1,1,1,1,1,1,1,1,1,1,1,1,1,1,1}
+};
+
+// Folder Icon
+static const uint8_t ICON_FOLDER[24][24] = {
+    {0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0},
+    {0,0,1,1,1,1,1,1,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0},
+    {0,1,5,5,5,5,5,5,1,1,1,1,1,1,1,1,1,1,1,1,1,1,0,0},
+    {1,5,5,5,5,5,5,5,5,5,5,5,5,5,5,5,5,5,5,5,5,5,1,0},
+    {1,5,5,5,5,5,5,5,5,5,5,5,5,5,5,5,5,5,5,5,5,5,1,0},
+    {1,5,5,5,5,5,5,5,5,5,5,5,5,5,5,5,5,5,5,5,5,5,1,0},
+    {1,1,1,1,1,1,1,1,1,1,1,1,1,1,1,1,1,1,1,1,1,1,1,0},
+    {1,5,5,5,5,5,5,5,5,5,5,5,5,5,5,5,5,5,5,5,5,5,1,0},
+    {1,5,5,5,5,5,5,5,5,5,5,5,5,5,5,5,5,5,5,5,5,5,1,0},
+    {1,5,5,5,5,5,5,5,5,5,5,5,5,5,5,5,5,5,5,5,5,5,1,0},
+    {1,5,5,5,5,5,5,5,5,5,5,5,5,5,5,5,5,5,5,5,5,5,1,0},
+    {1,5,5,5,5,5,5,5,5,5,5,5,5,5,5,5,5,5,5,5,5,5,1,0},
+    {1,5,5,5,5,5,5,5,5,5,5,5,5,5,5,5,5,5,5,5,5,5,1,0},
+    {1,5,5,5,5,5,5,5,5,5,5,5,5,5,5,5,5,5,5,5,5,5,1,0},
+    {1,5,5,5,5,5,5,5,5,5,5,5,5,5,5,5,5,5,5,5,5,5,1,0},
+    {1,5,5,5,5,5,5,5,5,5,5,5,5,5,5,5,5,5,5,5,5,5,1,0},
+    {1,5,5,5,5,5,5,5,5,5,5,5,5,5,5,5,5,5,5,5,5,5,1,0},
+    {1,5,5,5,5,5,5,5,5,5,5,5,5,5,5,5,5,5,5,5,5,5,1,0},
+    {1,5,5,5,5,5,5,5,5,5,5,5,5,5,5,5,5,5,5,5,5,5,1,0},
+    {1,5,5,5,5,5,5,5,5,5,5,5,5,5,5,5,5,5,5,5,5,5,1,0},
+    {1,5,5,5,5,5,5,5,5,5,5,5,5,5,5,5,5,5,5,5,5,5,1,0},
+    {1,5,5,5,5,5,5,5,5,5,5,5,5,5,5,5,5,5,5,5,5,5,1,0},
+    {1,5,5,5,5,5,5,5,5,5,5,5,5,5,5,5,5,5,5,5,5,5,1,0},
+    {1,1,1,1,1,1,1,1,1,1,1,1,1,1,1,1,1,1,1,1,1,1,1,0}
+};
+
+// Notepad Icon
+static const uint8_t ICON_NOTE[24][24] = {
+    {0,0,0,1,1,1,1,1,1,1,1,1,1,1,1,1,0,0,0,0,0,0,0,0},
+    {0,0,0,1,4,4,4,4,4,4,4,4,4,4,4,1,1,1,0,0,0,0,0,0},
+    {0,0,0,1,4,4,4,4,4,4,4,4,4,4,4,4,4,1,0,0,0,0,0,0},
+    {0,0,0,1,4,6,6,6,6,6,6,6,6,4,4,4,4,1,0,0,0,0,0,0},
+    {0,0,0,1,4,4,4,4,4,4,4,4,4,4,4,4,4,1,0,0,0,0,0,0},
+    {0,0,0,1,4,1,1,1,1,1,1,1,1,4,4,4,4,1,0,0,0,0,0,0},
+    {0,0,0,1,4,4,4,4,4,4,4,4,4,4,4,4,4,1,0,0,0,0,0,0},
+    {0,0,0,1,4,1,1,1,1,1,1,1,1,4,4,4,4,1,0,0,0,0,0,0},
+    {0,0,0,1,4,4,4,4,4,4,4,4,4,4,4,4,4,1,0,0,0,0,0,0},
+    {0,0,0,1,4,1,1,1,1,1,1,1,1,4,4,4,4,1,0,0,0,0,0,0},
+    {0,0,0,1,4,4,4,4,4,4,4,4,4,4,4,4,4,1,0,0,0,0,0,0},
+    {0,0,0,1,4,1,1,1,1,1,1,1,1,4,4,4,4,1,0,0,0,0,0,0},
+    {0,0,0,1,4,4,4,4,4,4,4,4,4,4,4,4,4,1,0,0,0,0,0,0},
+    {0,0,0,1,4,1,1,1,1,1,1,1,1,4,4,4,4,1,0,0,0,0,0,0},
+    {0,0,0,1,4,4,4,4,4,4,4,4,4,4,4,4,4,1,0,0,0,0,0,0},
+    {0,0,0,1,4,1,1,1,1,1,1,1,1,4,4,4,4,1,0,0,0,0,0,0},
+    {0,0,0,1,4,4,4,4,4,4,4,4,4,4,4,4,4,1,0,0,0,0,0,0},
+    {0,0,0,1,4,1,1,1,1,1,1,1,1,4,4,4,4,1,0,0,0,0,0,0},
+    {0,0,0,1,4,4,4,4,4,4,4,4,4,4,4,4,4,1,0,0,0,0,0,0},
+    {0,0,0,1,4,4,4,4,4,4,4,4,4,4,4,4,4,1,0,0,0,0,0,0},
+    {0,0,0,1,4,4,4,4,4,4,4,4,4,4,4,4,4,1,0,0,0,0,0,0},
+    {0,0,0,1,4,4,4,4,4,4,4,4,4,4,4,4,4,1,0,0,0,0,0,0},
+    {0,0,0,1,1,1,1,1,1,1,1,1,1,1,1,1,1,1,0,0,0,0,0,0},
     {0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0}
+};
+
+// Calc Icon
+static const uint8_t ICON_CALC[24][24] = {
+    {1,1,1,1,1,1,1,1,1,1,1,1,1,1,1,1,1,1,1,1,1,0,0,0},
+    {1,3,3,3,3,3,3,3,3,3,3,3,3,3,3,3,3,3,3,3,1,0,0,0},
+    {1,3,1,1,1,1,1,1,1,1,1,1,1,1,1,1,1,1,1,3,1,0,0,0},
+    {1,3,1,7,7,7,7,7,7,7,7,7,7,7,7,7,7,7,1,3,1,0,0,0},
+    {1,3,1,1,1,1,1,1,1,1,1,1,1,1,1,1,1,1,1,3,1,0,0,0},
+    {1,3,3,3,3,3,3,3,3,3,3,3,3,3,3,3,3,3,3,3,1,0,0,0},
+    {1,3,1,1,1,3,1,1,1,3,1,1,1,3,1,1,1,3,3,3,1,0,0,0},
+    {1,3,1,4,1,3,1,4,1,3,1,4,1,3,1,8,1,3,3,3,1,0,0,0},
+    {1,3,1,1,1,3,1,1,1,3,1,1,1,3,1,1,1,3,3,3,1,0,0,0},
+    {1,3,3,3,3,3,3,3,3,3,3,3,3,3,3,3,3,3,3,3,1,0,0,0},
+    {1,3,1,1,1,3,1,1,1,3,1,1,1,3,1,1,1,3,3,3,1,0,0,0},
+    {1,3,1,4,1,3,1,4,1,3,1,4,1,3,1,4,1,3,3,3,1,0,0,0},
+    {1,3,1,1,1,3,1,1,1,3,1,1,1,3,1,1,1,3,3,3,1,0,0,0},
+    {1,3,3,3,3,3,3,3,3,3,3,3,3,3,3,3,3,3,3,3,1,0,0,0},
+    {1,3,1,1,1,3,1,1,1,3,1,1,1,3,1,1,1,3,3,3,1,0,0,0},
+    {1,3,1,4,1,3,1,4,1,3,1,4,1,3,1,4,1,3,3,3,1,0,0,0},
+    {1,3,1,1,1,3,1,1,1,3,1,1,1,3,1,1,1,3,3,3,1,0,0,0},
+    {1,3,3,3,3,3,3,3,3,3,3,3,3,3,3,3,3,3,3,3,1,0,0,0},
+    {1,3,1,1,1,1,1,1,1,3,1,1,1,3,1,1,1,3,3,3,1,0,0,0},
+    {1,3,1,4,4,4,4,4,1,3,1,4,1,3,1,4,1,3,3,3,1,0,0,0},
+    {1,3,1,1,1,1,1,1,1,3,1,1,1,3,1,1,1,3,3,3,1,0,0,0},
+    {1,3,3,3,3,3,3,3,3,3,3,3,3,3,3,3,3,3,3,3,1,0,0,0},
+    {1,1,1,1,1,1,1,1,1,1,1,1,1,1,1,1,1,1,1,1,1,0,0,0},
+    {0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0}
+};
+
+// Settings Icon
+static const uint8_t ICON_SET[24][24] = {
+    {0,0,0,0,0,0,0,0,0,2,2,2,2,2,0,0,0,0,0,0,0,0,0,0},
+    {0,0,0,0,0,0,0,0,0,2,3,3,3,2,0,0,0,0,0,0,0,0,0,0},
+    {0,0,0,0,2,2,0,0,0,2,3,3,3,2,0,0,0,2,2,0,0,0,0,0},
+    {0,0,0,2,3,2,0,0,2,2,3,3,3,2,2,0,0,2,3,2,0,0,0,0},
+    {0,0,0,2,3,2,2,2,3,3,3,3,3,3,3,2,2,2,3,2,0,0,0,0},
+    {0,0,0,0,2,3,3,3,3,3,3,3,3,3,3,3,3,3,2,0,0,0,0,0},
+    {0,0,0,0,0,2,3,3,3,1,1,1,1,1,3,3,3,2,0,0,0,0,0,0},
+    {0,0,0,0,0,2,3,3,1,4,4,4,4,4,1,3,3,2,0,0,0,0,0,0},
+    {0,0,2,2,2,3,3,3,1,4,4,4,4,4,1,3,3,3,2,2,2,0,0,0},
+    {0,2,3,3,3,3,3,3,1,4,4,4,4,4,1,3,3,3,3,3,3,2,0,0},
+    {0,2,3,3,3,3,3,3,1,4,4,4,4,4,1,3,3,3,3,3,3,2,0,0},
+    {0,2,3,3,3,3,3,3,1,4,4,4,4,4,1,3,3,3,3,3,3,2,0,0},
+    {0,2,3,3,3,3,3,3,1,4,4,4,4,4,1,3,3,3,3,3,3,2,0,0},
+    {0,2,3,3,3,3,3,3,1,4,4,4,4,4,1,3,3,3,3,3,3,2,0,0},
+    {0,0,2,2,2,3,3,3,1,4,4,4,4,4,1,3,3,3,2,2,2,0,0,0},
+    {0,0,0,0,0,2,3,3,1,4,4,4,4,4,1,3,3,2,0,0,0,0,0,0},
+    {0,0,0,0,0,2,3,3,3,1,1,1,1,1,3,3,3,2,0,0,0,0,0,0},
+    {0,0,0,0,2,3,3,3,3,3,3,3,3,3,3,3,3,3,2,0,0,0,0,0},
+    {0,0,0,2,3,2,2,2,3,3,3,3,3,3,3,2,2,2,3,2,0,0,0,0},
+    {0,0,0,2,3,2,0,0,2,2,3,3,3,2,2,0,0,2,3,2,0,0,0,0},
+    {0,0,0,0,2,2,0,0,0,2,3,3,3,2,0,0,0,2,2,0,0,0,0,0},
+    {0,0,0,0,0,0,0,0,0,2,3,3,3,2,0,0,0,0,0,0,0,0,0,0},
+    {0,0,0,0,0,0,0,0,0,2,2,2,2,2,0,0,0,0,0,0,0,0,0,0},
+    {0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0}
+};
+
+// Trash Icon
+static const uint8_t ICON_TRASH[24][24] = {
+    {0,0,0,0,0,0,0,1,1,1,1,1,0,0,0,0,0,0,0,0,0,0,0,0},
+    {0,0,0,0,0,1,1,4,4,3,4,4,1,1,0,0,0,0,0,0,0,0,0,0},
+    {0,0,0,0,1,4,4,3,3,3,4,3,4,4,1,0,0,0,0,0,0,0,0,0},
+    {0,0,0,1,4,3,3,4,4,3,3,4,3,3,4,1,0,0,0,0,0,0,0,0}, 
+    {0,0,1,1,1,1,1,1,1,1,1,1,1,1,1,1,1,0,0,0,0,0,0,0}, 
+    {0,1,6,6,6,6,6,6,6,6,6,6,6,6,6,6,6,1,0,0,0,0,0,0}, 
+    {0,1,1,1,1,1,1,1,1,1,1,1,1,1,1,1,1,1,0,0,0,0,0,0}, 
+    {0,0,1,1,1,1,1,1,1,1,1,1,1,1,1,1,1,0,0,0,0,0,0,0}, 
+    {0,0,1,1,1,1,1,1,1,1,1,1,1,1,1,1,1,0,0,0,0,0,0,0},
+    {0,0,1,1,1,1,1,1,4,4,1,1,1,1,1,1,1,0,0,0,0,0,0,0}, 
+    {0,0,1,1,1,1,1,4,1,1,4,1,1,1,1,1,1,0,0,0,0,0,0,0},
+    {0,0,1,1,1,1,1,1,1,4,1,1,1,1,1,1,1,0,0,0,0,0,0,0},
+    {0,0,1,1,1,1,1,1,4,1,4,1,1,1,1,1,1,0,0,0,0,0,0,0},
+    {0,0,1,1,1,1,1,4,4,4,4,4,1,1,1,1,1,0,0,0,0,0,0,0},
+    {0,0,1,1,1,1,1,1,1,4,1,1,1,1,1,1,1,0,0,0,0,0,0,0},
+    {0,0,1,1,1,1,1,1,4,1,4,1,1,1,1,1,1,0,0,0,0,0,0,0},
+    {0,0,1,1,1,1,1,4,1,1,1,4,1,1,1,1,1,0,0,0,0,0,0,0},
+    {0,0,1,1,1,1,1,1,1,1,1,1,1,1,1,1,1,0,0,0,0,0,0,0},
+    {0,0,1,1,1,1,1,1,1,1,1,1,1,1,1,1,1,0,0,0,0,0,0,0},
+    {0,0,1,1,1,1,1,1,1,1,1,1,1,1,1,1,1,0,0,0,0,0,0,0},
+    {0,0,1,1,1,1,1,1,1,1,1,1,1,1,1,1,1,0,0,0,0,0,0,0},
+    {0,0,1,1,1,1,1,1,1,1,1,1,1,1,1,1,1,0,0,0,0,0,0,0},
+    {0,0,0,1,1,1,1,1,1,1,1,1,1,1,1,1,1,0,0,0,0,0,0,0},
+    {0,0,0,1,1,1,1,1,1,1,1,1,1,1,1,1,1,0,0,0,0,0,0,0}
 };
 
 // --- Helpers ---
@@ -224,7 +362,6 @@ static void close_window(int index) {
         windows[i] = windows[i+1];
         if (windows[i]) windows[i]->id = i; 
     }
-    // IMPORTANT: Clear the last slot to prevent duplication
     windows[MAX_WINDOWS - 1] = NULL;
 }
 
@@ -232,24 +369,19 @@ static int focus_window(int index) {
     if (index < 0 || index >= MAX_WINDOWS || windows[index] == NULL) return -1;
     Window* target = windows[index];
     
-    // Shift everything from index+1 down to index
     for (int i = index; i < MAX_WINDOWS - 1; i++) {
         windows[i] = windows[i+1];
         if (windows[i]) windows[i]->id = i;
     }
-    // Clear last slot to avoid duplication
     windows[MAX_WINDOWS - 1] = NULL;
     
-    // Find the first empty slot (which should be at the end now)
     int top_slot = 0;
     while (top_slot < MAX_WINDOWS && windows[top_slot] != NULL) top_slot++;
-    
     if (top_slot >= MAX_WINDOWS) top_slot = MAX_WINDOWS - 1;
 
     windows[top_slot] = target; 
     target->id = top_slot;
 
-    // Update flags
     for(int j=0; j<MAX_WINDOWS; j++) {
         if(windows[j]) {
             windows[j]->focused = (windows[j] == target);
@@ -261,7 +393,7 @@ static int focus_window(int index) {
 
 static Window* get_top_window(void) {
     for (int i = MAX_WINDOWS - 1; i >= 0; i--) { 
-        if (windows[i] != NULL) return windows[i]; 
+        if (windows[i] != NULL && windows[i]->visible) return windows[i]; 
     } 
     return NULL;
 }
@@ -273,9 +405,7 @@ static void create_window(AppType type, const char* title, int w, int h) {
     }
     
     if (slot == -1) { 
-        // Array full, close oldest
         close_window(0); 
-        // After close, slot is guaranteed
         slot = MAX_WINDOWS - 1; 
         while(slot > 0 && windows[slot] != NULL) slot--;
     }
@@ -289,17 +419,11 @@ static void create_window(AppType type, const char* title, int w, int h) {
     win->w = w; 
     win->h = h; 
     
-    // Basic cascade positioning
-    win->x = 40 + (slot * 25); 
-    win->y = 40 + (slot * 25);
+    win->x = 50 + (slot * 25); 
+    win->y = 50 + (slot * 25);
     
-    // Bounds check
-    if (win->x + w > screen_w) {
-        win->x = 20;
-    }
-    if (win->y + h > screen_h - TASKBAR_H) {
-        win->y = 20;
-    }
+    if (win->x + w > screen_w) win->x = 40;
+    if (win->y + h > screen_h - TASKBAR_H) win->y = 40;
 
     win->visible = true; 
     win->minimized = false; 
@@ -307,7 +431,6 @@ static void create_window(AppType type, const char* title, int w, int h) {
     win->dragging = false; 
     win->focused = true;
 
-    // Initialize App State
     if (type == APP_NOTEPAD) { 
         win->state.notepad.length = 0; 
         win->state.notepad.buffer[0] = 0; 
@@ -323,37 +446,26 @@ static void create_window(AppType type, const char* title, int w, int h) {
         win->state.term.input_len = 0;
         for(int k=0; k<6; k++) win->state.term.history[k][0] = 0;
         str_copy(win->state.term.history[0], "NostaluxOS GUI Terminal");
-        str_copy(win->state.term.history[1], "Type 'help' for commands");
     } 
     else if (type == APP_FILES) { 
         win->state.files.selected_index = -1; 
-        win->state.files.scroll_offset = 0; 
     }
     
     windows[slot] = win; 
     focus_window(slot);
 }
 
+// --- Interaction Handlers ---
+
 static void handle_settings_click(Window* w, int x, int y) {
     int cx = w->x + 4; 
     int cy = w->y + WIN_CAPTION_H + 4;
-    uint32_t colors_top[] = { 0xFF2D73A8, 0xFF2D882D, 0xFF882D2D, 0xFF333333 };
-    uint32_t colors_bot[] = { 0xFF103050, 0xFF103010, 0xFF301010, 0xFF000000 };
+    uint32_t colors[] = { 0xFF3A6EA5, 0xFF008080, 0xFF502020, 0xFF000000 };
     
     for (int i = 0; i < 4; i++) {
         int bx = cx + 10 + (i * 40);
         if (rect_contains(bx, cy + 30, 30, 30, x, y)) {
-            desktop_col_top = colors_top[i]; 
-            desktop_col_bot = colors_bot[i]; 
-            return;
-        }
-    }
-    
-    int sense_map[] = { 1, 2, 4 };
-    for (int i = 0; i < 3; i++) {
-        int bx = cx + 10 + (i * 60);
-        if (rect_contains(bx, cy + 100, 50, 24, x, y)) {
-            mouse_set_sensitivity(sense_map[i]); 
+            desktop_color = colors[i];
             return;
         }
     }
@@ -362,11 +474,9 @@ static void handle_settings_click(Window* w, int x, int y) {
 static void handle_files_click(Window* w, int x, int y) {
     int cx = w->x + 4;
     int cy = w->y + WIN_CAPTION_H + 4;
-    
     size_t count = fs_file_count();
     for (size_t i = 0; i < count; i++) {
         int ry = cy + 24 + i * 18;
-        // Check if row is visible and clicked
         if (ry + 18 < w->y + w->h && rect_contains(cx + 2, ry, w->w - 12, 18, x, y)) {
             w->state.files.selected_index = (int)i;
             return;
@@ -377,39 +487,23 @@ static void handle_files_click(Window* w, int x, int y) {
 static void handle_terminal_input(Window* w, char c) {
     TerminalState* ts = &w->state.term;
     if (c == '\n') {
-        // Shift history
         for (int i=0; i<5; i++) str_copy(ts->history[i], ts->history[i+1]);
-        
         char line[80]; 
         str_copy(line, ts->prompt);
         int p_len = kstrlen_local(line); 
         int i = 0; 
         while(ts->input[i] && p_len < 79) line[p_len++] = ts->input[i++];
         line[p_len] = 0; 
-        
         str_copy(ts->history[5], line);
         
-        if (kstrcmp(ts->input, "exit") == 0) { 
-            close_window(w->id); 
-            return; 
-        }
-        else if (kstrcmp(ts->input, "cls") == 0) { 
-            for(int k=0; k<6; k++) ts->history[k][0] = 0; 
-        }
-        else if (kstrcmp(ts->input, "help") == 0) {
-            for (int k=0; k<5; k++) str_copy(ts->history[k], ts->history[k+1]);
-            str_copy(ts->history[5], "  cmds: help, cls, exit");
-        }
+        if (kstrcmp(ts->input, "exit") == 0) close_window(w->id);
+        else if (kstrcmp(ts->input, "cls") == 0) for(int k=0; k<6; k++) ts->history[k][0] = 0;
+        
         ts->input[0] = 0; 
         ts->input_len = 0;
     } 
-    else if (c == '\b') { 
-        if (ts->input_len > 0) ts->input[--ts->input_len] = 0; 
-    } 
-    else if (c >= 32 && c <= 126 && ts->input_len < 60) { 
-        ts->input[ts->input_len++] = c; 
-        ts->input[ts->input_len] = 0; 
-    }
+    else if (c == '\b') { if (ts->input_len > 0) ts->input[--ts->input_len] = 0; } 
+    else if (c >= 32 && c <= 126 && ts->input_len < 60) { ts->input[ts->input_len++] = c; ts->input[ts->input_len] = 0; }
 }
 
 static void handle_calc_logic(Window* w, char key) {
@@ -417,42 +511,25 @@ static void handle_calc_logic(Window* w, char key) {
     int cx = w->x + 14; 
     int cy = w->y + WIN_CAPTION_H + 54;
     const char* btns = "789/456*123-C0=+";
-    
     for(int b=0; b<16; b++) {
         int bx = cx + 10 + (b%4)*40; 
         int by = cy + (b/4)*35;
         if (rect_contains(bx, by, 35, 30, mouse.x, mouse.y)) {
             char c = btns[b]; 
             CalcState* s = &w->state.calc;
-            
             if (c >= '0' && c <= '9') {
                 int d = c - '0';
-                if (s->new_entry) { 
-                    s->current_val = d; 
-                    s->new_entry = false; 
-                }
-                else if (s->current_val < 100000000) {
-                    s->current_val = s->current_val * 10 + d;
-                }
+                if (s->new_entry) { s->current_val = d; s->new_entry = false; }
+                else if (s->current_val < 100000000) s->current_val = s->current_val * 10 + d;
             } 
-            else if (c == 'C') { 
-                s->current_val = 0; 
-                s->accumulator = 0; 
-                s->op = 0; 
-                s->new_entry = true; 
-            } 
-            else if (c == '+' || c == '-' || c == '*' || c == '/') { 
-                s->accumulator = s->current_val; 
-                s->op = c; 
-                s->new_entry = true; 
-            } 
+            else if (c == 'C') { s->current_val = 0; s->accumulator = 0; s->op = 0; s->new_entry = true; } 
+            else if (c == '+' || c == '-' || c == '*' || c == '/') { s->accumulator = s->current_val; s->op = c; s->new_entry = true; } 
             else if (c == '=') {
                 if (s->op == '+') s->current_val = s->accumulator + s->current_val;
                 else if (s->op == '-') s->current_val = s->accumulator - s->current_val;
                 else if (s->op == '*') s->current_val = s->accumulator * s->current_val;
                 else if (s->op == '/') { if(s->current_val!=0) s->current_val = s->accumulator / s->current_val; }
-                s->op = 0; 
-                s->new_entry = true;
+                s->op = 0; s->new_entry = true;
             }
             return;
         }
@@ -461,347 +538,272 @@ static void handle_calc_logic(Window* w, char key) {
 
 static void toggle_maximize(Window* w) {
     if (w->maximized) { 
-        w->x = w->restore_x; 
-        w->y = w->restore_y; 
-        w->w = w->restore_w; 
-        w->h = w->restore_h; 
+        w->x = w->restore_x; w->y = w->restore_y; 
+        w->w = w->restore_w; w->h = w->restore_h; 
         w->maximized = false; 
-    } 
-    else { 
-        w->restore_x = w->x; 
-        w->restore_y = w->y; 
-        w->restore_w = w->w; 
-        w->restore_h = w->h; 
-        w->x = 0; 
-        w->y = 0; 
-        w->w = screen_w; 
-        w->h = screen_h - TASKBAR_H; 
+    } else { 
+        w->restore_x = w->x; w->restore_y = w->y; 
+        w->restore_w = w->w; w->restore_h = w->h; 
+        w->x = 0; w->y = 0; w->w = screen_w; w->h = screen_h - TASKBAR_H; 
         w->maximized = true; 
     }
 }
 
-// --- Drawing Helpers ---
+// --- Drawing Primitives ---
 
-static void draw_gradient_rect(int x, int y, int w, int h, uint32_t c1, uint32_t c2) {
-    for (int i=0; i<h; i++) {
-        uint8_t r1 = (c1 >> 16) & 0xFF, g1 = (c1 >> 8) & 0xFF, b1 = c1 & 0xFF;
-        uint8_t r2 = (c2 >> 16) & 0xFF, g2 = (c2 >> 8) & 0xFF, b2 = c2 & 0xFF;
-        
-        uint8_t r = r1 + ((int)(r2 - r1) * i) / h;
-        uint8_t g = g1 + ((int)(g2 - g1) * i) / h;
-        uint8_t b = b1 + ((int)(b2 - b1) * i) / h;
-        
-        graphics_fill_rect(x, y+i, w, 1, 0xFF000000 | (r << 16) | (g << 8) | b);
+static void draw_bevel_box(int x, int y, int w, int h, bool sunk) {
+    graphics_fill_rect(x, y, w, h, COL_BTN_FACE);
+    uint32_t tl = sunk ? COL_BTN_SHADOW : COL_BTN_HILIGHT;
+    uint32_t br = sunk ? COL_BTN_HILIGHT : COL_BTN_SHADOW;
+    graphics_fill_rect(x, y, w, 1, tl);
+    graphics_fill_rect(x, y, 1, h, tl);
+    graphics_fill_rect(x, y+h-1, w, 1, br);
+    graphics_fill_rect(x+w-1, y, 1, h, br);
+    // Inner bevel for softer look
+    if (!sunk) {
+        graphics_fill_rect(x+1, y+1, w-2, 1, COL_BTN_FACE); // Top inner
+        graphics_fill_rect(x+1, y+1, 1, h-2, COL_BTN_FACE); // Left inner
+        graphics_fill_rect(x+1, y+h-2, w-2, 1, 0xFF808080); // Bot inner
+        graphics_fill_rect(x+w-2, y+1, 1, h-2, 0xFF808080); // Right inner
     }
 }
 
-static void draw_bevel_rect(int x, int y, int w, int h, uint32_t fill, bool sunk) {
-    graphics_fill_rect(x, y, w, h, fill);
-    uint32_t tl = sunk ? 0xFF555555 : 0xFFFFFFFF; 
-    uint32_t br = sunk ? 0xFFFFFFFF : 0xFF555555; 
+static void draw_window_border(int x, int y, int w, int h) {
+    // 3D Frame
+    graphics_fill_rect(x, y, w, h, COL_BTN_FACE);
+    graphics_fill_rect(x, y, w, 1, COL_BTN_HILIGHT);
+    graphics_fill_rect(x, y, 1, h, COL_BTN_HILIGHT);
+    graphics_fill_rect(x, y+h-1, w, 1, COL_BLACK);
+    graphics_fill_rect(x+w-1, y, 1, h, COL_BLACK);
     
-    graphics_fill_rect(x, y, w, 1, tl); 
-    graphics_fill_rect(x, y, 1, h, tl);      
-    graphics_fill_rect(x, y+h-1, w, 1, br); 
-    graphics_fill_rect(x+w-1, y, 1, h, br);  
+    graphics_fill_rect(x+1, y+1, w-2, 1, COL_BTN_FACE);
+    graphics_fill_rect(x+1, y+1, 1, h-2, COL_BTN_FACE);
+    graphics_fill_rect(x+1, y+h-2, w-2, 1, COL_BTN_SHADOW);
+    graphics_fill_rect(x+w-2, y+1, 1, h-2, COL_BTN_SHADOW);
 }
 
-// Helper to draw outlined rectangle for Maximize icon
-static void draw_rect_outline(int x, int y, int w, int h, uint32_t color) {
-    graphics_fill_rect(x, y, w, 1, color);         // Top
-    graphics_fill_rect(x, y + h - 1, w, 1, color); // Bottom
-    graphics_fill_rect(x, y, 1, h, color);         // Left
-    graphics_fill_rect(x + w - 1, y, 1, h, color); // Right
-}
-
-// Draws pixel-perfect icons for window controls
-static void draw_icon(int x, int y, int type, uint32_t color) {
-    // x,y is top-left of the icon 10x10 area
-    if (type == 0) { // Close (X)
-        for(int i=0; i<8; i++) {
-            graphics_put_pixel(x+1+i, y+1+i, color);
-            graphics_put_pixel(x+1+i, y+1+i+1, color); // Thickness
-            graphics_put_pixel(x+8-i, y+1+i, color);
-            graphics_put_pixel(x+8-i, y+1+i+1, color); 
+// Draws the 24x24 icons
+static void draw_icon_bitmap(int x, int y, const uint8_t bitmap[24][24]) {
+    for (int ry=0; ry<24; ry++) {
+        for (int rx=0; rx<24; rx++) {
+            uint8_t c = bitmap[ry][rx];
+            if (c != 0) {
+                uint32_t col = 0;
+                switch(c) {
+                    case 1: col = 0xFF000000; break; // Black
+                    case 2: col = 0xFF444444; break; // DkGrey
+                    case 3: col = 0xFF888888; break; // Grey
+                    case 4: col = 0xFFFFFFFF; break; // White
+                    case 5: col = 0xFFFFCC00; break; // Yellow
+                    case 6: col = 0xFF0000AA; break; // Blue
+                    case 7: col = 0xFF00AA00; break; // Green
+                    case 8: col = 0xFFAA0000; break; // Red
+                }
+                graphics_put_pixel(x+rx, y+ry, col);
+            }
         }
-    } else if (type == 1) { // Maximize (Box)
-        draw_rect_outline(x+1, y+1, 9, 9, color);
-    } else if (type == 2) { // Restore (Two Boxes)
-        draw_rect_outline(x+3, y, 6, 6, color); 
-        draw_rect_outline(x, y+3, 7, 7, color);
-    } else if (type == 3) { // Minimize (_)
-        graphics_fill_rect(x+1, y+7, 8, 3, color);
     }
 }
 
-// --- App Renderers ---
-
-static void render_terminal(Window* w, int cx, int cy) {
-    graphics_fill_rect(cx, cy, w->w-8, w->h-WIN_CAPTION_H-8, COL_BLACK);
-    
-    for(int i=0; i<6; i++) {
-        graphics_draw_string_scaled(cx+4, cy+4+(i*10), w->state.term.history[i], COL_GREEN, COL_BLACK, 1);
-    }
-    
-    int input_y = cy + 4 + (6*10);
-    graphics_draw_string_scaled(cx+4, input_y, w->state.term.prompt, COL_GREEN, COL_BLACK, 1);
-    int prompt_w = kstrlen_local(w->state.term.prompt) * 8;
-    graphics_draw_string_scaled(cx+4+prompt_w, input_y, w->state.term.input, COL_WHITE, COL_BLACK, 1);
-    
-    // Blinking cursor
-    if ((timer_get_ticks() / 15) % 2) {
-        graphics_fill_rect(cx+4+prompt_w+(w->state.term.input_len*8), input_y, 8, 8, COL_GREEN);
-    }
-}
-
-static void render_notepad(Window* w, int cx, int cy) {
-    draw_bevel_rect(cx+2, cy+2, w->w-4, w->h-WIN_CAPTION_H-4, COL_WHITE, true);
-    graphics_draw_string_scaled(cx+6, cy+6, w->state.notepad.buffer, COL_BLACK, COL_WHITE, 1);
-    if ((timer_get_ticks() / 15) % 2) {
-        graphics_fill_rect(cx+6+(w->state.notepad.length*8), cy+6, 2, 10, COL_BLACK);
-    }
-}
-
-static void render_settings(Window* w, int cx, int cy) {
-    draw_bevel_rect(cx, cy, w->w-8, w->h-WIN_CAPTION_H-8, COL_WIN_BODY, false);
-    graphics_draw_string_scaled(cx+10, cy+10, "Background Color:", COL_BLACK, COL_WIN_BODY, 1);
-    
-    uint32_t colors[] = { 0xFF2D73A8, 0xFF2D882D, 0xFF882D2D, 0xFF333333 };
-    for (int i = 0; i < 4; i++) {
-        int bx = cx + 10 + (i * 40);
-        bool h = rect_contains(bx, cy+30, 30, 30, mouse.x, mouse.y);
-        if (h) graphics_fill_rect(bx-2, cy+28, 34, 34, COL_BLACK);
-        graphics_fill_rect(bx, cy+30, 30, 30, colors[i]);
-    }
-    
-    graphics_draw_string_scaled(cx+10, cy+80, "Mouse Speed:", COL_BLACK, COL_WIN_BODY, 1);
-    const char* speeds[] = { "Slow", "Med", "Fast" };
-    int sense_map[] = { 1, 2, 4 };
-    int current_sense = mouse_get_sensitivity();
-    
-    for (int i = 0; i < 3; i++) {
-        int bx = cx + 10 + (i * 60); int by = cy + 100;
-        bool active = (current_sense == sense_map[i]);
-        bool h = rect_contains(bx, by, 50, 24, mouse.x, mouse.y);
-        draw_bevel_rect(bx, by, 50, 24, active?COL_START_HOVER:(h?COL_BTN_HOVER:0xFFDDDDDD), active||(h&&mouse.left_button));
-        graphics_draw_string_scaled(bx+10, by+8, speeds[i], active?COL_WHITE:COL_BLACK, 0, 1);
-    }
-}
-
-static void render_calc(Window* w, int cx, int cy) {
-    char buf[16]; int_to_str(w->state.calc.current_val, buf);
-    draw_bevel_rect(cx+10, cy+10, w->w-20, 30, COL_WHITE, true);
-    graphics_draw_string_scaled(cx+w->w-20-(kstrlen_local(buf)*16), cy+15, buf, COL_BLACK, COL_WHITE, 2);
-    
-    const char* btns[] = {"7","8","9","/", "4","5","6","*", "1","2","3","-", "C","0","=","+"};
-    for(int i=0; i<16; i++) {
-        int bx = cx+10 + (i%4)*40, by = cy+50 + (i/4)*35;
-        bool h = rect_contains(bx, by, 35, 30, mouse.x, mouse.y);
-        draw_bevel_rect(bx, by, 35, 30, (h&&mouse.left_button)?COL_BTN_PRESS:(h?COL_BTN_HOVER:0xFFDDDDDD), h&&mouse.left_button);
-        graphics_draw_char(bx+12, by+10, btns[i][0], COL_BLACK, 0);
-    }
-}
-
-static void render_file_manager(Window* w, int cx, int cy) {
-    draw_bevel_rect(cx, cy, w->w-8, w->h-WIN_CAPTION_H-8, COL_WHITE, true);
-    graphics_fill_rect(cx+1, cy+1, w->w-10, 20, 0xFFEEEEEE);
-    graphics_draw_string_scaled(cx+5, cy+7, "Name", COL_BLACK, 0xFFEEEEEE, 1);
-    
-    size_t count = fs_file_count();
-    for (size_t i = 0; i < count; i++) {
-        const struct fs_file* f = fs_file_at(i); 
-        if(!f) continue;
-        
-        int ry = cy + 24 + i * 18; 
-        if(ry > cy+w->h-40) break;
-        
-        bool s = ((int)i == w->state.files.selected_index);
-        if (s) graphics_fill_rect(cx+2, ry, w->w-12, 18, 0xFF316AC5);
-        
-        graphics_draw_string_scaled(cx+20, ry+4, f->name, s?COL_WHITE:COL_BLACK, s?0xFF316AC5:COL_WHITE, 1);
-        char sb[16]; int_to_str(f->size, sb);
-        graphics_draw_string_scaled(cx+w->w-60, ry+4, sb, s?COL_WHITE:COL_BLACK, s?0xFF316AC5:COL_WHITE, 1);
-    }
-}
-
-static void render_system_info(Window* w, int cx, int cy) {
-    (void)w; 
-    graphics_draw_string_scaled(cx+20, cy+20, "NostaluxOS v1.0", COL_BLACK, COL_WIN_BODY, 2);
-    
-    const struct system_profile* p = system_profile_info();
-    char mem[32]; 
-    int_to_str(p->memory_total_kb / 1024, mem);
-    
-    graphics_draw_string_scaled(cx+20, cy+60, "Memory: ", 0xFF555555, COL_WIN_BODY, 1);
-    graphics_draw_string_scaled(cx+90, cy+60, mem, COL_BLACK, COL_WIN_BODY, 1);
-}
+// --- Window Rendering ---
 
 static void render_window(Window* w) {
     if (!w || !w->visible || w->minimized) return;
-    
-    // Shadow if not maximized
+
+    // Window shadow (if not maximized)
     if (!w->maximized) {
         graphics_fill_rect(w->x+4, w->y+4, w->w, w->h, 0x50000000);
     }
-    
-    // Main Body
-    graphics_fill_rect(w->x, w->y, w->w, w->h, COL_WIN_BODY);
-    
+
+    // Border
+    draw_window_border(w->x, w->y, w->w, w->h);
+
     // Title Bar
-    draw_gradient_rect(w->x+3, w->y+3, w->w-6, WIN_CAPTION_H, 
-        w->focused ? COL_WIN_TITLE_1 : COL_WIN_INACT_1, 
-        w->focused ? COL_WIN_TITLE_2 : COL_WIN_INACT_2);
+    uint32_t tcol1 = w->focused ? COL_WIN_TITLE_1 : 0xFF707070;
+    uint32_t tcol2 = w->focused ? COL_WIN_TITLE_2 : 0xFF909090;
     
-    graphics_draw_string_scaled(w->x+8, w->y+8, w->title, COL_WHITE, 0, 1);
-    
+    // Gradient Title
+    for(int i=0; i<WIN_CAPTION_H-4; i++) {
+        graphics_fill_rect(w->x+3, w->y+3+i, w->w-6, 1, tcol1); // Simplified for now
+    }
+    graphics_fill_rect(w->x+3, w->y+3, w->w-6, WIN_CAPTION_H-4, tcol1);
+
+    graphics_draw_string_scaled(w->x+6, w->y+6, w->title, COL_WIN_TEXT, tcol1, 1);
+
     // Controls
-    int bx = w->x + w->w - 25;
-    bool hc = rect_contains(bx, w->y+5, 20, 18, mouse.x, mouse.y);
-    draw_bevel_rect(bx, w->y+5, 20, 18, hc?COL_RED_HOVER:COL_RED, false);
-    // Draw Close Icon
-    draw_icon(bx+5, w->y+9, 0, COL_WHITE);
-    
-    int mx = bx - 22; 
-    bool hm = rect_contains(mx, w->y+5, 20, 18, mouse.x, mouse.y);
-    draw_bevel_rect(mx, w->y+5, 20, 18, hm?COL_BTN_HOVER:0xFFDDDDDD, false);
-    // Draw Max/Restore Icon
-    draw_icon(mx+5, w->y+9, w->maximized ? 2 : 1, COL_BLACK);
-    
-    int mn = mx - 22; 
-    bool hmn = rect_contains(mn, w->y+5, 20, 18, mouse.x, mouse.y);
-    draw_bevel_rect(mn, w->y+5, 20, 18, hmn?COL_BTN_HOVER:0xFFDDDDDD, false);
-    // Draw Minimize Icon
-    draw_icon(mn+5, w->y+9, 3, COL_BLACK);
-    
+    int bx = w->x + w->w - 22;
+    draw_bevel_box(bx, w->y+5, 16, 14, false); // Close
+    graphics_draw_char(bx+4, w->y+8, 'X', COL_BLACK, COL_BTN_FACE);
+
+    int mx = bx - 20;
+    draw_bevel_box(mx, w->y+5, 16, 14, false); // Max/Restore
+    if (w->maximized) graphics_draw_char(mx+4, w->y+8, '2', COL_BLACK, COL_BTN_FACE); // Placeholder for icon
+    else graphics_draw_char(mx+4, w->y+8, '1', COL_BLACK, COL_BTN_FACE);
+
+    int mn = mx - 20;
+    draw_bevel_box(mn, w->y+5, 16, 14, false); // Min
+    graphics_draw_char(mn+4, w->y+6, '_', COL_BLACK, COL_BTN_FACE);
+
     // Client Area
-    int cx = w->x+4, cy = w->y+WIN_CAPTION_H+4;
-    
-    if (w->type == APP_NOTEPAD) render_notepad(w, cx, cy); 
-    else if (w->type == APP_CALC) render_calc(w, cx, cy);
-    else if (w->type == APP_FILES) render_file_manager(w, cx, cy); 
-    else if (w->type == APP_SETTINGS) render_settings(w, cx, cy);
-    else if (w->type == APP_TERMINAL) render_terminal(w, cx, cy); 
-    else render_system_info(w, cx, cy);
+    int cx = w->x+4; int cy = w->y+WIN_CAPTION_H+2;
+    int cw = w->w-8; int ch = w->h-WIN_CAPTION_H-6;
+    graphics_fill_rect(cx, cy, cw, ch, COL_WIN_BODY);
+
+    if (w->type == APP_NOTEPAD) {
+        draw_bevel_box(cx, cy, cw, ch, true);
+        graphics_fill_rect(cx+2, cy+2, cw-4, ch-4, COL_WHITE);
+        graphics_draw_string_scaled(cx+4, cy+4, w->state.notepad.buffer, COL_BLACK, COL_WHITE, 1);
+        // Cursor
+        if ((timer_get_ticks() / 15) % 2) {
+             graphics_fill_rect(cx+4+(w->state.notepad.length*8), cy+4, 2, 10, COL_BLACK);
+        }
+    } 
+    else if (w->type == APP_TERMINAL) {
+        draw_bevel_box(cx, cy, cw, ch, true);
+        graphics_fill_rect(cx+2, cy+2, cw-4, ch-4, COL_BLACK);
+        for(int i=0; i<6; i++) 
+            graphics_draw_string_scaled(cx+4, cy+4+(i*10), w->state.term.history[i], 0xFF00FF00, COL_BLACK, 1);
+        
+        int input_y = cy+64;
+        graphics_draw_string_scaled(cx+4, input_y, w->state.term.prompt, 0xFF00FF00, COL_BLACK, 1);
+        int pw = kstrlen_local(w->state.term.prompt)*8;
+        graphics_draw_string_scaled(cx+4+pw, input_y, w->state.term.input, COL_WHITE, COL_BLACK, 1);
+        if ((timer_get_ticks()/15)%2) graphics_fill_rect(cx+4+pw+(w->state.term.input_len*8), input_y, 8, 8, 0xFF00FF00);
+    }
+    else if (w->type == APP_CALC) {
+        char buf[16]; int_to_str(w->state.calc.current_val, buf);
+        draw_bevel_box(cx+10, cy+10, cw-20, 24, true);
+        graphics_fill_rect(cx+12, cy+12, cw-24, 20, COL_WHITE);
+        graphics_draw_string_scaled(cx+cw-14-(kstrlen_local(buf)*8), cy+16, buf, COL_BLACK, COL_WHITE, 1);
+        const char* btns[] = {"7","8","9","/", "4","5","6","*", "1","2","3","-", "C","0","=","+"};
+        for(int i=0; i<16; i++) {
+            int bx_pos = cx+10 + (i%4)*40; int by_pos = cy+45 + (i/4)*30;
+            bool h = rect_contains(bx_pos, by_pos, 35, 25, mouse.x, mouse.y);
+            draw_bevel_box(bx_pos, by_pos, 35, 25, h&&mouse.left_button);
+            graphics_draw_char(bx_pos+12, by_pos+8, btns[i][0], COL_BLACK, COL_BTN_FACE);
+        }
+    }
+    else if (w->type == APP_FILES) {
+        draw_bevel_box(cx, cy, cw, ch, true);
+        graphics_fill_rect(cx+2, cy+2, cw-4, ch-4, COL_WHITE);
+        graphics_fill_rect(cx+2, cy+2, cw-4, 18, COL_BTN_FACE);
+        graphics_draw_string_scaled(cx+6, cy+6, "Name", COL_BLACK, COL_BTN_FACE, 1);
+        size_t count = fs_file_count();
+        for (size_t i=0; i<count; i++) {
+            const struct fs_file* f = fs_file_at(i); if(!f) continue;
+            int ry = cy+22 + i*16;
+            bool sel = ((int)i == w->state.files.selected_index);
+            if (sel) graphics_fill_rect(cx+2, ry, cw-4, 16, 0xFF000080);
+            draw_icon_bitmap(cx+4, ry, ICON_FOLDER); // Reuse folder icon scaled down? No, too big. 
+            // Just draw text for now
+            graphics_draw_string_scaled(cx+20, ry+4, f->name, sel?COL_WHITE:COL_BLACK, sel?0xFF000080:COL_WHITE, 1);
+            char sz[16]; int_to_str(f->size, sz);
+            graphics_draw_string_scaled(cx+cw-60, ry+4, sz, sel?COL_WHITE:COL_BLACK, sel?0xFF000080:COL_WHITE, 1);
+        }
+    }
+    else if (w->type == APP_SETTINGS) {
+        graphics_draw_string_scaled(cx+10, cy+10, "Background:", COL_BLACK, COL_WIN_BODY, 1);
+        uint32_t colors[] = { 0xFF3A6EA5, 0xFF008080, 0xFF502020, 0xFF000000 };
+        for(int i=0; i<4; i++) {
+            int bx = cx+10 + i*40;
+            draw_bevel_box(bx, cy+28, 30, 30, true);
+            graphics_fill_rect(bx+2, cy+30, 26, 26, colors[i]);
+        }
+    }
+    else {
+        graphics_draw_string_scaled(cx+20, cy+20, "Welcome to NostaluxOS", COL_BLACK, COL_WIN_BODY, 1);
+        graphics_draw_string_scaled(cx+20, cy+40, "Ring 3 GUI Demo", 0xFF555555, COL_WIN_BODY, 1);
+    }
 }
+
+// --- Desktop Rendering ---
 
 static void render_desktop(void) {
     // Background
-    draw_gradient_rect(0, 0, screen_w, screen_h - TASKBAR_H, desktop_col_top, desktop_col_bot);
-    graphics_draw_string_scaled(screen_w - 180, 10, "Ring 3 Protected Mode", 0x80FFFFFF, 0, 1);
+    graphics_fill_rect(0, 0, screen_w, screen_h, desktop_color);
     
     // Icons
-    struct { int x, y; const char* lbl; } icons[] = { 
-        {20, 20, "Terminal"}, 
-        {20, 80, "My Files"}, 
-        {20, 140, "Notepad"}, 
-        {20, 200, "Calc"},
-        {20, 260, "Trash"}  // Added Trash Bin at index 4
+    struct { int x, y; const char* lbl; const uint8_t (*bmp)[24]; AppType app; } icons[] = {
+        {20, 20, "Terminal", ICON_TERM, APP_TERMINAL},
+        {20, 90, "My Files", ICON_FOLDER, APP_FILES},
+        {20, 160, "Notepad", ICON_NOTE, APP_NOTEPAD},
+        {20, 230, "Calc", ICON_CALC, APP_CALC},
+        {20, 300, "Settings", ICON_SET, APP_SETTINGS},
+        {20, 370, "Trash", ICON_TRASH, APP_NONE}
     };
     
-    for (int i=0; i<5; i++) {
-        bool h = rect_contains(icons[i].x, icons[i].y, 64, 55, mouse.x, mouse.y);
-        if (h) graphics_fill_rect(icons[i].x, icons[i].y, 64, 55, 0x40FFFFFF);
+    for (int i=0; i<6; i++) {
+        bool h = rect_contains(icons[i].x, icons[i].y, 64, 60, mouse.x, mouse.y);
+        if (h) graphics_fill_rect(icons[i].x-5, icons[i].y-5, 50, 50, 0x40000080);
         
-        if (i == 4) {
-            // Draw Trash Bin Bitmap (Index 4)
-            // Centered in 64x55 box. 24x26 bitmap.
-            // x_start = icons[i].x + (64-24)/2 = +20
-            // y_start = icons[i].y + 5
-            int tx = icons[i].x + 20;
-            int ty = icons[i].y + 5;
-            
-            for(int py=0; py<26; py++) {
-                for(int px=0; px<24; px++) {
-                    uint8_t c = TRASH_BITMAP[py][px];
-                    if(c != 0) {
-                        uint32_t col = 0;
-                        if (c == 1) col = 0xFF000000; // Black
-                        else if (c == 2) col = 0xFF4070D0; // Blue
-                        else if (c == 3) col = 0xFF203870; // Dark Blue
-                        else if (c == 4) col = 0xFFFFFFFF; // White
-                        else if (c == 5) col = 0xFFC0C0C0; // Grey
-                        
-                        // Draw 2x scale for visibility? Or 1x? 24px is small. 
-                        // Let's stick to 1x scaling to match design.
-                        graphics_put_pixel(tx+px, ty+py, col);
-                    }
-                }
-            }
-        } else {
-            // Icon graphic (generic box for others)
-            graphics_fill_rect(icons[i].x+16, icons[i].y+5, 32, 28, (i==0)?0xFF000000:(i==1?0xFFDDAA00:0xFFEEEEEE));
-            if (i==0) graphics_draw_string_scaled(icons[i].x+18, icons[i].y+8, ">_", COL_GREEN, COL_BLACK, 1);
-        }
+        draw_icon_bitmap(icons[i].x + 8, icons[i].y, icons[i].bmp);
         
-        graphics_draw_string_scaled(icons[i].x+5, icons[i].y+40, icons[i].lbl, COL_WHITE, 0, 1);
+        // Text Shadow
+        graphics_draw_string_scaled(icons[i].x+2, icons[i].y+36, icons[i].lbl, COL_BLACK, 0, 1);
+        graphics_draw_string_scaled(icons[i].x+1, icons[i].y+35, icons[i].lbl, COL_WHITE, 0, 1);
     }
-    
-    // Windows
+
+    // Windows (Back to Front)
     for (int i=0; i<MAX_WINDOWS; i++) {
         if(windows[i]) render_window(windows[i]);
     }
-    
+
     // Taskbar
     int ty = screen_h - TASKBAR_H;
-    draw_gradient_rect(0, ty, screen_w, TASKBAR_H, 0xFF245580, COL_TASKBAR);
+    draw_bevel_box(0, ty, screen_w, TASKBAR_H, false);
     
     // Start Button
-    bool hs = rect_contains(0, ty, 80, TASKBAR_H, mouse.x, mouse.y);
-    draw_gradient_rect(0, ty, 80, TASKBAR_H, (hs||start_menu_open)?COL_START_HOVER:COL_START_BTN, COL_TASKBAR);
-    graphics_draw_string_scaled(30, ty+10, "Start", COL_WHITE, 0, 1);
-    
-    // Clock
-    char time_buf[8]; syscall_get_time(time_buf);
-    draw_bevel_rect(screen_w-60, ty+4, 56, TASKBAR_H-8, 0xFF153050, true);
-    graphics_draw_string_scaled(screen_w-52, ty+10, time_buf, COL_WHITE, 0xFF153050, 1);
-    
-    // Taskbar Tabs
-    int tx = 90;
+    bool start_hover = rect_contains(2, ty+2, 60, TASKBAR_H-4, mouse.x, mouse.y);
+    draw_bevel_box(2, ty+2, 60, TASKBAR_H-4, start_menu_open || (start_hover && mouse.left_button));
+    graphics_draw_string_scaled(10, ty+8, "Start", COL_BLACK, COL_BTN_FACE, 1);
+
+    // Task Buttons
+    int tx = 70;
     for(int i=0; i<MAX_WINDOWS; i++) {
         if(windows[i] && windows[i]->visible) {
-            bool a = windows[i]->focused && !windows[i]->minimized;
-            draw_bevel_rect(tx, ty+4, 100, TASKBAR_H-8, a?0xFF3A6EA5:0xFF2A4E75, !a);
+            bool active = (windows[i]->focused && !windows[i]->minimized);
+            // Dotted pattern for active window button?
+            draw_bevel_box(tx, ty+2, 100, TASKBAR_H-4, active);
             
-            char s[11]; 
-            int c=0; 
-            while(c<10&&windows[i]->title[c]){s[c]=windows[i]->title[c];c++;}
-            s[c]=0;
-            
-            graphics_draw_string_scaled(tx+5, ty+10, s, COL_WHITE, 0, 1);
-            tx += 105;
+            char s[12]; int c=0; while(c<10&&windows[i]->title[c]){s[c]=windows[i]->title[c];c++;} s[c]=0;
+            graphics_draw_string_scaled(tx+6, ty+8, s, COL_BLACK, COL_BTN_FACE, 1);
+            tx += 104;
         }
     }
-    
-    // Start Menu Overlay
+
+    // System Tray
+    draw_bevel_box(screen_w-70, ty+2, 68, TASKBAR_H-4, true);
+    char time_buf[8]; syscall_get_time(time_buf);
+    graphics_draw_string_scaled(screen_w-60, ty+8, time_buf, COL_BLACK, COL_BTN_FACE, 1);
+
+    // Start Menu
     if (start_menu_open) {
-        int mh = 280, my = ty - mh;
-        draw_bevel_rect(0, my, 160, 200, COL_WIN_BODY, false);
-        graphics_fill_rect(0, my, 24, mh, COL_START_BTN);
+        int mh = 210; int my = ty - mh;
+        draw_window_border(0, my, 140, mh);
+        // Sidebar
+        graphics_fill_rect(2, my+2, 20, mh-4, COL_WIN_TITLE_1);
+        graphics_draw_char(8, my+mh-30, 'O', COL_WHITE, COL_WIN_TITLE_1);
+        graphics_draw_char(8, my+mh-40, 'S', COL_WHITE, COL_WIN_TITLE_1);
         
-        struct { int y; const char* lbl; } items[] = { 
-            {my+10, "Terminal"}, 
-            {my+40, "File Explorer"}, 
-            {my+80, "Notepad"}, 
-            {my+110, "Calculator"}, 
-            {my+150, "Settings"}, 
-            {my+240, "Shutdown"} 
+        struct { int y; const char* lbl; AppType app; } items[] = { 
+            {my+10, "Terminal", APP_TERMINAL}, {my+40, "Files", APP_FILES}, 
+            {my+70, "Notepad", APP_NOTEPAD}, {my+100, "Calc", APP_CALC}, 
+            {my+130, "Settings", APP_SETTINGS}, {my+170, "Shutdown", APP_NONE} 
         };
-        
         for(int i=0; i<6; i++) {
-            if(i==5) graphics_fill_rect(25, items[i].y-10, 130, 1, 0xFFAAAAAA);
-            bool h = rect_contains(25, items[i].y, 130, 24, mouse.x, mouse.y);
-            if(h) graphics_fill_rect(25, items[i].y, 130, 24, COL_BTN_HOVER);
-            graphics_draw_string_scaled(35, items[i].y+6, items[i].lbl, h?COL_WHITE:COL_BLACK, 0, 1);
+            if(i==5) graphics_fill_rect(26, items[i].y-8, 110, 1, 0xFF808080);
+            bool h = rect_contains(24, items[i].y, 114, 24, mouse.x, mouse.y);
+            if(h) graphics_fill_rect(24, items[i].y, 114, 24, COL_WIN_TITLE_1);
+            graphics_draw_string_scaled(34, items[i].y+6, items[i].lbl, h?COL_WHITE:COL_BLACK, h?COL_WIN_TITLE_1:COL_BTN_FACE, 1);
         }
     }
-    
-    // Mouse Cursor
-    int mx = mouse.x, my = mouse.y;
+
+    // Cursor
+    int mx = mouse.x; int my = mouse.y;
     for(int y=0; y<19; y++) {
         for(int x=0; x<12; x++) {
-            if(CURSOR_BITMAP[y][x]) {
+            if(CURSOR_BITMAP[y][x]) 
                 graphics_put_pixel(mx+x, my+y, CURSOR_BITMAP[y][x]==1?COL_BLACK:COL_WHITE);
-            }
         }
     }
 }
@@ -809,160 +811,124 @@ static void render_desktop(void) {
 static void on_click(int x, int y) {
     int ty = screen_h - TASKBAR_H;
     
-    // Handle Start Menu interaction first
+    // Start Menu
     if (start_menu_open) {
-        int my = ty - 280;
-        if (x < 160 && y > my) {
-            if (rect_contains(0, my+10, 160, 24, x, y)) create_window(APP_TERMINAL, "Terminal", 400, 300);
-            else if (rect_contains(0, my+40, 160, 24, x, y)) create_window(APP_FILES, "File Explorer", 400, 300);
-            else if (rect_contains(0, my+80, 160, 24, x, y)) create_window(APP_NOTEPAD, "Notepad", 300, 200);
-            else if (rect_contains(0, my+110, 160, 24, x, y)) create_window(APP_CALC, "Calculator", 220, 300);
-            else if (rect_contains(0, my+150, 160, 24, x, y)) create_window(APP_SETTINGS, "Settings", 250, 200);
-            else if (rect_contains(0, my+240, 160, 30, x, y)) syscall_shutdown();
-            start_menu_open = false; 
-            return;
+        int mh = 210; int my = ty - mh;
+        if (x < 140 && y > my) {
+            if (rect_contains(24, my+10, 114, 24, x, y)) create_window(APP_TERMINAL, "Terminal", 400, 300);
+            else if (rect_contains(24, my+40, 114, 24, x, y)) create_window(APP_FILES, "Files", 400, 300);
+            else if (rect_contains(24, my+70, 114, 24, x, y)) create_window(APP_NOTEPAD, "Notepad", 300, 200);
+            else if (rect_contains(24, my+100, 114, 24, x, y)) create_window(APP_CALC, "Calc", 220, 300);
+            else if (rect_contains(24, my+130, 114, 24, x, y)) create_window(APP_SETTINGS, "Settings", 250, 200);
+            else if (rect_contains(24, my+170, 114, 30, x, y)) syscall_shutdown();
+            start_menu_open = false; return;
         }
-        start_menu_open = false;
+        start_menu_open = false; 
     }
-    
-    // Handle Taskbar Clicks
+
+    // Taskbar
     if (y >= ty) {
-        if (x < 80) { 
-            start_menu_open = !start_menu_open; 
-            return; 
-        }
-        int tx = 90;
+        if (rect_contains(0, ty, 65, TASKBAR_H, x, y)) { start_menu_open = !start_menu_open; return; }
+        int tx = 70;
         for (int i=0; i<MAX_WINDOWS; i++) {
             if(windows[i] && windows[i]->visible) {
                 if (rect_contains(tx, ty, 100, TASKBAR_H, x, y)) {
-                    if(windows[i]->focused && !windows[i]->minimized) {
-                        windows[i]->minimized = true; 
-                    } else {
-                        focus_window(i); 
+                    if (windows[i]->focused && !windows[i]->minimized) windows[i]->minimized = true;
+                    else {
+                        windows[i]->minimized = false;
+                        focus_window(i);
                     }
                     return;
-                } 
-                tx += 105;
+                }
+                tx += 104;
             }
         }
         return;
     }
-    
-    // Handle Window Clicks (Front to Back)
+
+    // Windows
     for (int i = MAX_WINDOWS - 1; i >= 0; i--) {
         Window* w = windows[i];
         if (w && w->visible && !w->minimized) {
             if (rect_contains(w->x, w->y, w->w, w->h, x, y)) {
-                int idx = focus_window(i); 
-                w = windows[idx];
+                int idx = focus_window(i); w = windows[idx];
                 
-                int by = w->y+5; 
-                int bx = w->x + w->w - 25; // Close X start
-                int mx = bx - 22;          // Max start
-                int mn = mx - 22;          // Min start
+                int bx = w->x + w->w - 22;
+                if (rect_contains(bx, w->y+5, 16, 14, x, y)) { close_window(idx); return; }
                 
-                // Title Bar Buttons (Hitbox 20x18)
-                if (rect_contains(bx, by, 20, 18, x, y)) { close_window(idx); return; }
-                if (rect_contains(mx, by, 20, 18, x, y)) { toggle_maximize(w); return; }
-                if (rect_contains(mn, by, 20, 18, x, y)) { w->minimized = true; return; }
+                int mx = bx - 20;
+                if (rect_contains(mx, w->y+5, 16, 14, x, y)) { toggle_maximize(w); return; }
                 
-                // Dragging
-                if (y < w->y + WIN_CAPTION_H && !w->maximized) { 
-                    w->dragging = true; 
-                    w->drag_off_x = x - w->x; 
-                    w->drag_off_y = y - w->y; 
-                    return; 
+                int mn = mx - 20;
+                if (rect_contains(mn, w->y+5, 16, 14, x, y)) { w->minimized = true; return; }
+
+                if (y < w->y + WIN_CAPTION_H && !w->maximized) {
+                    w->dragging = true;
+                    w->drag_off_x = x - w->x; w->drag_off_y = y - w->y;
+                    return;
                 }
-                
-                // App logic
-                if (w->type == APP_CALC) handle_calc_logic(w, 0); 
+                if (w->type == APP_CALC) handle_calc_logic(w, 0);
                 if (w->type == APP_SETTINGS) handle_settings_click(w, x, y);
                 if (w->type == APP_FILES) handle_files_click(w, x, y);
                 return;
             }
         }
     }
-    
+
     // Desktop Icons
-    if (rect_contains(20, 20, 64, 55, x, y)) create_window(APP_TERMINAL, "Terminal", 400, 300);
-    else if (rect_contains(20, 80, 64, 55, x, y)) create_window(APP_FILES, "File Explorer", 400, 300);
-    else if (rect_contains(20, 140, 64, 55, x, y)) create_window(APP_NOTEPAD, "Notepad", 300, 200);
-    else if (rect_contains(20, 200, 64, 55, x, y)) create_window(APP_CALC, "Calc", 220, 300);
-    else if (rect_contains(20, 260, 64, 55, x, y)) create_window(APP_FILES, "Trash Bin", 400, 300);
+    if (rect_contains(20, 20, 60, 60, x, y)) create_window(APP_TERMINAL, "Terminal", 400, 300);
+    else if (rect_contains(20, 90, 60, 60, x, y)) create_window(APP_FILES, "Files", 400, 300);
+    else if (rect_contains(20, 160, 60, 60, x, y)) create_window(APP_NOTEPAD, "Notepad", 300, 200);
+    else if (rect_contains(20, 230, 60, 60, x, y)) create_window(APP_CALC, "Calc", 220, 300);
+    else if (rect_contains(20, 300, 60, 60, x, y)) create_window(APP_SETTINGS, "Settings", 250, 200);
 }
 
 void gui_demo_run(void) {
-    syscall_log("GUI: Ring 3 Desktop Started");
+    syscall_log("GUI: Started (Classic Theme)");
     g_gui_running = true;
     graphics_enable_double_buffer();
-    screen_w = graphics_get_width(); 
-    screen_h = graphics_get_height();
+    screen_w = graphics_get_width(); screen_h = graphics_get_height();
     
     for(int i=0; i<MAX_WINDOWS; i++) windows[i] = NULL;
-    
     create_window(APP_WELCOME, "Welcome", 300, 160);
-    
-    bool running = true;
-    while(running) {
+
+    while(1) {
         syscall_yield();
-        
         char c = keyboard_poll_char();
-        if (c == 27) running = false; // Escape to exit
-        
+        if (c == 27) break; // Escape
+
         Window* top = get_top_window();
-        
-        // Handle Keyboard input for focused window
-        if (c && top && top->visible && !top->minimized && top->focused) {
+        if (c && top && top->focused && !top->minimized) {
             if (top->type == APP_NOTEPAD) {
                 NotepadState* ns = &top->state.notepad;
-                if (c == '\b') { 
-                    if (ns->length > 0) ns->buffer[--ns->length] = 0; 
-                } 
-                else if (c >= 32 && c <= 126 && ns->length < 510) { 
-                    ns->buffer[ns->length++] = c; 
-                    ns->buffer[ns->length] = 0; 
-                }
-            } else if (top->type == APP_TERMINAL) {
-                handle_terminal_input(top, c);
-            }
+                if (c=='\b' && ns->length>0) ns->buffer[--ns->length]=0;
+                else if (c>=32 && c<=126 && ns->length<510) { ns->buffer[ns->length++]=c; ns->buffer[ns->length]=0; }
+            } else if (top->type == APP_TERMINAL) handle_terminal_input(top, c);
         }
+
+        prev_mouse = mouse; syscall_get_mouse(&mouse);
         
-        // Mouse handling
-        prev_mouse = mouse; 
-        syscall_get_mouse(&mouse);
-        
-        // Window Dragging
-        if (mouse.left_button && top && top->visible && top->dragging) {
-            top->x = mouse.x - top->drag_off_x; 
+        if (mouse.left_button && top && top->dragging) {
+            top->x = mouse.x - top->drag_off_x;
             top->y = mouse.y - top->drag_off_y;
-            
-            // Bounds clamping
-            if (top->x < 0) top->x = 0; 
+            // Improved dragging constraints
             if (top->y < 0) top->y = 0;
-            if (top->x > screen_w - 40) top->x = screen_w - 40; 
-            if (top->y > screen_h - 40) top->y = screen_h - 40;
+            if (top->y > screen_h - TASKBAR_H - WIN_CAPTION_H) top->y = screen_h - TASKBAR_H - WIN_CAPTION_H;
+            if (top->x + top->w < 40) top->x = 40 - top->w;
+            if (top->x > screen_w - 40) top->x = screen_w - 40;
         }
-        
-        // Mouse Clicks
-        if (mouse.left_button && !prev_mouse.left_button) {
-            on_click(mouse.x, mouse.y);
-        }
-        
-        // Release Dragging
-        if (!mouse.left_button && prev_mouse.left_button) {
+
+        if (mouse.left_button && !prev_mouse.left_button) on_click(mouse.x, mouse.y);
+        if (!mouse.left_button && prev_mouse.left_button) 
             for(int i=0; i<MAX_WINDOWS; i++) if(windows[i]) windows[i]->dragging = false;
-        }
-        
-        render_desktop(); 
+
+        render_desktop();
         graphics_swap_buffer();
     }
     
-    // Cleanup
     for(int i=0; i<MAX_WINDOWS; i++) if(windows[i]) syscall_free(windows[i]);
-    
-    graphics_fill_rect(0, 0, screen_w, screen_h, COL_BLACK); 
+    graphics_fill_rect(0, 0, screen_w, screen_h, COL_BLACK);
     graphics_swap_buffer();
-    
-    g_gui_running = false; 
+    g_gui_running = false;
     syscall_exit();
 }
