@@ -79,7 +79,7 @@ typedef enum {
     APP_CALC, 
     APP_FILES, 
     APP_SETTINGS, 
-    APP_TERMINAL,
+    APP_TERMINAL, 
     APP_BROWSER,
     APP_TASKMGR
 } AppType;
@@ -148,7 +148,7 @@ static bool start_menu_open = false;
 static int screen_w, screen_h;
 static MouseState mouse;
 static MouseState prev_mouse;
-static bool g_wallpaper_enabled = true; // Default to on
+static bool g_wallpaper_enabled = false; // DISABLED by default for performance
 
 // --- BITMAPS ---
 
@@ -731,8 +731,7 @@ static void draw_icon_bitmap(int x, int y, const uint8_t bitmap[24][24]) {
 }
 
 static void draw_wallpaper(void) {
-    // Procedural Underwater Wallpaper
-    // Use gradient for depth
+    // Procedural Underwater Wallpaper (Optimized fill)
     for (int y = 0; y < screen_h; y++) {
         // Deep blue to lighter blue
         int r = 0;
@@ -746,23 +745,22 @@ static void draw_wallpaper(void) {
     graphics_fill_rect(0, screen_h - 100, screen_w, 100, 0xFFD2B48C); // Tan color
 
     // Draw some "Coral" (Random colored rects)
-    // We use a deterministic seed so it doesn't flicker every frame
     rand_state = 999;
     for (int i = 0; i < 15; i++) {
         int cx = fast_rand() % screen_w;
         int ch = 30 + (fast_rand() % 50);
         int cw = 10 + (fast_rand() % 30);
         int cy = screen_h - 100 - ch + 10;
-        uint32_t ccol = (fast_rand() % 2) ? 0xFFFF7F50 : 0xFFFF69B4; // Coral or HotPink
+        uint32_t ccol = (fast_rand() % 2) ? 0xFFFF7F50 : 0xFFFF69B4; 
         graphics_fill_rect(cx, cy, cw, ch, ccol);
     }
     
-    // Draw Bubbles
-    rand_state = (timer_get_ticks() / 10) + 100; // Animate slightly
-    for (int i = 0; i < 20; i++) {
+    // Draw Bubbles (lighter load)
+    rand_state = (timer_get_ticks() / 10) + 100;
+    for (int i = 0; i < 15; i++) {
         int bx = fast_rand() % screen_w;
         int by = fast_rand() % (screen_h - 100);
-        graphics_fill_rect(bx, by, 4, 4, 0x80FFFFFF); // Semi-transparent white fake
+        graphics_fill_rect(bx, by, 4, 4, 0x80FFFFFF); 
     }
 }
 
@@ -985,9 +983,17 @@ static void render_desktop(void) {
         }
     }
 
-    // System Tray
+    // System Tray & Mouse Debug
     char time_buf[8]; syscall_get_time(time_buf);
     graphics_draw_string_scaled(screen_w-60, ty+10, time_buf, COL_WHITE, COL_TASKBAR, 1);
+    
+    // Debug Mouse Coordinates
+    char mouse_pos[16];
+    int_to_str(mouse.x, mouse_pos);
+    int len = kstrlen_local(mouse_pos);
+    mouse_pos[len] = ',';
+    int_to_str(mouse.y, mouse_pos+len+1);
+    graphics_draw_string_scaled(screen_w-150, ty+10, mouse_pos, 0xFF888888, COL_TASKBAR, 1);
 
     // Start Menu
     if (start_menu_open) {
@@ -1106,6 +1112,12 @@ void gui_demo_run(void) {
     graphics_enable_double_buffer();
     screen_w = graphics_get_width(); screen_h = graphics_get_height();
     
+    // FIX: Initialize mouse position locally to center of screen to prevent startup jump
+    mouse.x = screen_w / 2;
+    mouse.y = screen_h / 2;
+    mouse.left_button = false;
+    mouse.right_button = false;
+    
     for(int i=0; i<MAX_WINDOWS; i++) windows[i] = NULL;
     create_window(APP_WELCOME, "Welcome", 300, 160);
 
@@ -1127,7 +1139,8 @@ void gui_demo_run(void) {
             }
         }
 
-        prev_mouse = mouse; syscall_get_mouse(&mouse);
+        prev_mouse = mouse; 
+        syscall_get_mouse(&mouse);
         
         if (mouse.left_button && top && top->dragging) {
             top->x = mouse.x - top->drag_off_x;
@@ -1146,7 +1159,7 @@ void gui_demo_run(void) {
         render_desktop();
         graphics_swap_buffer();
     }
-    
+
     for(int i=0; i<MAX_WINDOWS; i++) if(windows[i]) syscall_free(windows[i]);
     graphics_fill_rect(0, 0, screen_w, screen_h, COL_BLACK);
     graphics_swap_buffer();
