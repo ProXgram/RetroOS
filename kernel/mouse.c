@@ -42,6 +42,9 @@ static uint8_t mouse_read(void) {
 }
 
 void mouse_init(void) {
+    // Critical: Disable interrupts during init to prevent ISR from stealing ACKs
+    __asm__ volatile("cli");
+
     uint8_t status;
 
     // 1. Enable Mouse Port (Command 0xA8)
@@ -79,29 +82,29 @@ void mouse_init(void) {
     // Unmask IRQ 12 (Slave PIC line 4)
     interrupts_enable_irq(12);
     
+    // Re-enable interrupts
+    __asm__ volatile("sti");
+
     syslog_write("Mouse: PS/2 initialized (IRQ12 unmasked)");
 }
 
 void mouse_handle_interrupt(void) {
     uint8_t status = inb(MOUSE_PORT_STATUS);
     
-    // Check if there is data to read. If not, we can't do anything.
+    // Check if there is data to read.
     if (!(status & 0x01)) return;
 
-    // Read the data. This effectively clears the interrupt.
+    // Read the data.
     uint8_t b = inb(MOUSE_PORT_DATA);
 
-    // If the data didn't come from the mouse (Bit 5 of status), ignore it.
-    // However, by reading it above, we ensured the controller isn't stuck.
+    // If the data didn't come from the mouse, ignore it.
     if (!(status & 0x20)) return;
 
     switch(g_mouse_cycle) {
         case 0:
-            // Packet Byte 1:
-            // Bit 3 must be 1. 
-            // Bit 6,7: Overflow (usually 0).
-            // Note: Some mice might not set Bit 3 strictly if not fully compliant, 
-            // but most standard PS/2 mice do. We'll keep the check for sync.
+            // Packet Byte 1
+            // We verify bit 3 is 1 to ensure sync.
+            // If out of sync, we discard byte and wait for next header.
             if ((b & 0x08) == 0x08) { 
                 g_mouse_byte[0] = b;
                 g_mouse_cycle++;
@@ -117,28 +120,20 @@ void mouse_handle_interrupt(void) {
             g_mouse_byte[2] = b;
             g_mouse_cycle = 0;
 
-            // Decode Packet
-            // Byte 0: Y_Overflow X_Overflow Y_Sign X_Sign 1 Middle Right Left
-            
-            // Handle 9-bit signed values
+            // Handle movement
             int dx = (int8_t)g_mouse_byte[1];
             int dy = (int8_t)g_mouse_byte[2];
             
-            // Check Overflow bits in byte 0
-            bool x_overflow = (g_mouse_byte[0] & 0x40) != 0;
-            bool y_overflow = (g_mouse_byte[0] & 0x80) != 0;
-            
-            if (x_overflow || y_overflow) {
-                // Discard erratic movement
-                dx = 0;
-                dy = 0;
+            // Overflow checks
+            if ((g_mouse_byte[0] & 0x40) || (g_mouse_byte[0] & 0x80)) {
+                dx = 0; dy = 0;
             }
 
             // Apply Sensitivity
             dx *= g_sensitivity;
             dy *= g_sensitivity;
             
-            // Update Position (PS/2 Y is bottom-to-top, screen is top-to-bottom)
+            // Update Position (PS/2 Y is bottom-to-top)
             g_mouse_x += dx;
             g_mouse_y -= dy; 
 
@@ -155,16 +150,12 @@ void mouse_handle_interrupt(void) {
             // Update Buttons
             g_left_btn = (g_mouse_byte[0] & 0x01) != 0;
             g_right_btn = (g_mouse_byte[0] & 0x02) != 0;
-            
-            // Uncomment for heavy debugging (will slow down system)
-            // syslog_write("Mouse: Packet processed");
             break;
     }
 }
 
 MouseState mouse_get_state(void) {
     MouseState s;
-    // Atomic read would be better, but for a hobby OS this is okay
     s.x = g_mouse_x;
     s.y = g_mouse_y;
     s.left_button = g_left_btn;
