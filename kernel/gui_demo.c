@@ -229,7 +229,7 @@ static const uint8_t ICON_TASKMGR[24][24] = {
     {1,2,1,1,1,1,1,1,1,1,1,1,1,1,1,1,1,1,1,1,1,1,2,1},
     {1,2,1,1,1,1,1,1,1,1,1,1,1,1,1,1,1,1,1,1,1,1,2,1},
     {1,2,1,1,1,1,1,1,1,1,1,1,1,1,1,1,1,1,1,1,1,1,2,1},
-    {1,2,1,1,1,1,1,1,1,1,1,1,1,1,1,1,1,1,7,1,1,1,2,1},
+    {1,2,1,1,1,1,1,1,1,1,1,1,1,1,1,7,7,7,7,1,1,1,2,1},
     {1,2,1,1,1,1,1,1,1,1,1,1,1,1,1,7,7,7,7,1,1,1,2,1},
     {1,2,1,1,1,1,1,1,1,1,1,1,1,1,7,7,1,1,1,1,1,1,2,1},
     {1,2,1,1,1,1,1,1,1,1,1,1,1,7,7,1,1,1,1,1,1,1,2,1},
@@ -1016,7 +1016,15 @@ static void render_desktop(void) {
     }
 
     // Cursor
-    int mx = mouse.x; int my_pos = mouse.y;
+    // Ensure mouse is within screen bounds for drawing
+    int mx = mouse.x; 
+    int my_pos = mouse.y;
+    
+    if (mx < 0) mx = 0;
+    if (mx > screen_w - 12) mx = screen_w - 12;
+    if (my_pos < 0) my_pos = 0;
+    if (my_pos > screen_h - 19) my_pos = screen_h - 19;
+
     for(int y=0; y<19; y++) {
         for(int x=0; x<12; x++) {
             if(CURSOR_BITMAP[y][x]) 
@@ -1159,7 +1167,7 @@ void gui_demo_run(void) {
         render_desktop();
         graphics_swap_buffer();
     }
-
+    
     for(int i=0; i<MAX_WINDOWS; i++) if(windows[i]) syscall_free(windows[i]);
     graphics_fill_rect(0, 0, screen_w, screen_h, COL_BLACK);
     graphics_swap_buffer();
